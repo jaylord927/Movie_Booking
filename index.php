@@ -39,10 +39,10 @@ $page = str_replace(['..', '/\\', '../'], '', $page);
 // Define allowed pages
 $allowed_pages = [
     'home' => 'pages/home.php',
-    'admin-home' => 'pages/admin-home.php', // NEW
+    'admin-home' => 'pages/admin-home.php',
     'login' => 'pages/login.php',
     'register' => 'pages/register.php',
-    'movies' => 'pages/movies.php', // NEW
+    'movies' => 'pages/movies.php',
     'logout' => 'pages/logout.php',
     
     // Customer pages

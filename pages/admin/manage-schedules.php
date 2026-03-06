@@ -63,7 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_schedule'])) {
                 $seat_stmt = $conn->prepare("INSERT INTO seat_availability (schedule_id, movie_title, show_date, showtime, seat_number, seat_type, is_available, price) VALUES (?, ?, ?, ?, ?, ?, 1, ?)");
                 
                 for ($i = 1; $i <= $total_seats; $i++) {
-                    $seat_number = chr(64 + ceil($i / 10)) . str_pad((($i - 1) % 10) + 1, 2, '0', STR_PAD_LEFT);
+                    $row_number = ceil($i / 10);
+                    $row_letter = chr(64 + $row_number);
+                    $seat_in_row = (($i - 1) % 10) + 1;
+                    $seat_number = $row_letter . str_pad($seat_in_row, 2, '0', STR_PAD_LEFT);
+                    
                     $seat_type = 'Standard';
                     $price = $standard_price;
                     
@@ -277,6 +281,8 @@ if (isset($_GET['manage_seats']) && is_numeric($_GET['manage_seats'])) {
     $schedule_result = $schedule_info->get_result();
     $current_schedule = $schedule_result->fetch_assoc();
     $schedule_info->close();
+    
+    echo "<script>console.log('Total seats in database: " . count($seats) . "');</script>";
 }
 
 $count_result = $conn->query("SELECT COUNT(*) as total FROM movie_schedules WHERE is_active = 1");
@@ -311,7 +317,8 @@ $conn->close();
         
         <div style="background: rgba(23, 162, 184, 0.2); color: #17a2b8; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; font-weight: 600; border: 1px solid rgba(23, 162, 184, 0.3);">
             <i class="fas fa-info-circle"></i> 
-            Show Time: <?php echo date('M d, Y', strtotime($current_schedule['show_date'])); ?> at <?php echo date('h:i A', strtotime($current_schedule['showtime'])); ?>
+            Show Time: <?php echo date('M d, Y', strtotime($current_schedule['show_date'])); ?> at <?php echo date('h:i A', strtotime($current_schedule['showtime'])); ?> | 
+            Total Seats in Database: <strong><?php echo count($seats); ?></strong>
         </div>
         
         <div style="background: rgba(52, 152, 219, 0.1); border-radius: 10px; padding: 20px; margin-bottom: 30px;">
@@ -354,13 +361,28 @@ $conn->close();
                 </div>
             </div>
             
-            <div style="background: rgba(0, 0, 0, 0.3); padding: 30px; border-radius: 10px; margin-bottom: 30px;">
+            <div style="background: rgba(0, 0, 0, 0.3); padding: 30px; border-radius: 10px; margin-bottom: 30px; overflow-x: auto;">
                 <div style="text-align: center; margin-bottom: 30px; color: white; font-size: 1.5rem; font-weight: 700;">
                     <i class="fas fa-film"></i> SCREEN
                 </div>
                 
-                <div style="display: grid; grid-template-columns: repeat(10, 1fr); gap: 15px; max-width: 800px; margin: 0 auto;">
-                    <?php foreach ($seats as $seat): 
+                <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;">
+                    <?php 
+                    $current_row = '';
+                    $row_count = 0;
+                    foreach ($seats as $index => $seat): 
+                        $seat_number = $seat['seat_number'];
+                        $row_letter = substr($seat_number, 0, 1);
+                        
+                        if ($current_row != $row_letter) {
+                            if ($current_row != '') {
+                                echo '</div><div style="margin-bottom: 20px;"></div>';
+                            }
+                            $current_row = $row_letter;
+                            $row_count++;
+                            echo '<div style="width: 100%; margin-bottom: 15px;"><div style="color: #3498db; font-size: 1.2rem; font-weight: 700; margin-bottom: 10px;">Row ' . $row_letter . '</div><div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">';
+                        }
+                        
                         $seat_color = '#3498db';
                         if ($seat['seat_type'] === 'Premium') $seat_color = '#2ecc71';
                         if ($seat['seat_type'] === 'Sweet Spot') $seat_color = '#e74c3c';
@@ -375,16 +397,22 @@ $conn->close();
                             $display_price = $current_schedule['standard_price'] ?? 350;
                         }
                     ?>
-                    <div style="text-align: center;">
+                    <div style="text-align: center; min-width: 80px;">
                         <div style="margin-bottom: 5px; color: white; font-size: 0.9rem; font-weight: 600;"><?php echo $seat['seat_number']; ?></div>
-                        <select name="seat_type[<?php echo $seat['id']; ?>]" style="width: 100%; padding: 10px; background: <?php echo $seat_color; ?>; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 6px; color: white; font-weight: 600; cursor: pointer; text-align: center;" <?php echo !$seat['is_available'] ? 'disabled' : ''; ?>>
+                        <select name="seat_type[<?php echo $seat['id']; ?>]" style="width: 100%; padding: 8px; background: <?php echo $seat_color; ?>; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 6px; color: white; font-weight: 600; cursor: pointer; text-align: center;" <?php echo !$seat['is_available'] ? 'disabled' : ''; ?>>
                             <option value="Standard" <?php echo $seat['seat_type'] === 'Standard' ? 'selected' : ''; ?> style="background: #2c3e50; color: white;">Standard</option>
                             <option value="Premium" <?php echo $seat['seat_type'] === 'Premium' ? 'selected' : ''; ?> style="background: #2c3e50; color: white;">Premium</option>
                             <option value="Sweet Spot" <?php echo $seat['seat_type'] === 'Sweet Spot' ? 'selected' : ''; ?> style="background: #2c3e50; color: white;">Sweet Spot</option>
                         </select>
-                        <div style="margin-top: 5px; color: white; font-size: 0.8rem;">₱<?php echo number_format($display_price, 2); ?></div>
+                        <div style="margin-top: 5px; color: white; font-size: 0.75rem;">₱<?php echo number_format($display_price, 0); ?></div>
                     </div>
-                    <?php endforeach; ?>
+                    <?php 
+                        if (($index + 1) % 10 == 0 && $index + 1 < count($seats)) {
+                            echo '</div><div style="margin: 10px 0;"></div><div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">';
+                        }
+                    endforeach; 
+                    echo '</div>';
+                    ?>
                 </div>
             </div>
             
@@ -423,13 +451,14 @@ $conn->close();
                 <div>
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;"><i class="fas fa-film"></i> Movie *</label>
                     <select id="movie_id" name="movie_id" required style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem; cursor: pointer; appearance: none; background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" fill=\"white\" viewBox=\"0 0 20 20\"><path d=\"M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z\"/></svg>'); background-repeat: no-repeat; background-position: right 16px center; background-size: 16px;">
-                        <option value="">Select Movie</option>
+                        <option value="" style="background: #2c3e50; color: white;">Select Movie</option>
                         <?php foreach ($movies as $movie): ?>
                         <option value="<?php echo $movie['id']; ?>" 
                                 data-standard="<?php echo $movie['standard_price'] ?? 350; ?>"
                                 data-premium="<?php echo $movie['premium_price'] ?? 450; ?>"
                                 data-sweet="<?php echo $movie['sweet_spot_price'] ?? 550; ?>"
-                                <?php echo ($edit_mode && $edit_schedule['movie_id'] == $movie['id']) || (isset($_POST['movie_id']) && $_POST['movie_id'] == $movie['id']) ? 'selected' : ''; ?>>
+                                <?php echo ($edit_mode && $edit_schedule['movie_id'] == $movie['id']) || (isset($_POST['movie_id']) && $_POST['movie_id'] == $movie['id']) ? 'selected' : ''; ?>
+                                style="background: #2c3e50; color: white;">
                             <?php echo htmlspecialchars($movie['title']); ?> 
                             (Std: ₱<?php echo number_format($movie['standard_price'] ?? 350, 0); ?> | 
                             Prem: ₱<?php echo number_format($movie['premium_price'] ?? 450, 0); ?> | 
@@ -460,8 +489,8 @@ $conn->close();
                     <input type="number" id="total_seats" name="total_seats" required
                            value="<?php echo $edit_mode ? $edit_schedule['total_seats'] : (isset($_POST['total_seats']) ? $_POST['total_seats'] : '40'); ?>"
                            style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           min="1" max="100" placeholder="Maximum seats">
-                    <div style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem; margin-top: 5px;">Standard: 40 seats (A01-A40)</div>
+                           min="1" max="100000" placeholder="Maximum seats">
+                    <div style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem; margin-top: 5px;">You can set up to 100,000 seats</div>
                 </div>
             </div>
             
@@ -677,17 +706,6 @@ $conn->close();
         
         table {
             font-size: 0.9rem;
-        }
-        
-        .seat-grid {
-            grid-template-columns: repeat(5, 1fr) !important;
-            gap: 10px !important;
-        }
-    }
-    
-    @media (max-width: 480px) {
-        .seat-grid {
-            grid-template-columns: repeat(4, 1fr) !important;
         }
     }
 </style>

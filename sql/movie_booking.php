@@ -1,7 +1,5 @@
--- Movie Ticketing Database Schema - COMPLETE VERSION
-
-CREATE DATABASE IF NOT EXISTS movie;
-USE movie;
+CREATE DATABASE IF NOT EXISTS movie_booking;
+USE movie_booking;
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (

@@ -95,7 +95,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_suggestion']))
         </div>
     </div>
 
-    <!-- How Our Scheduling Works -->
     <div style="background: linear-gradient(135deg, rgba(226, 48, 32, 0.1), rgba(193, 27, 24, 0.2)); border-radius: 20px; padding: 50px; margin-bottom: 60px; border: 2px solid rgba(226, 48, 32, 0.3);">
         <h2 style="color: white; font-size: 2rem; text-align: center; margin-bottom: 40px; font-weight: 800;">How Our Cinema Scheduling Works</h2>
         
@@ -206,7 +205,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_suggestion']))
             <div>
                 <h2 style="color: white; font-size: 2rem; margin-bottom: 20px; font-weight: 800;">Our Story</h2>
                 <p style="color: rgba(255,255,255,0.9); line-height: 1.8; margin-bottom: 20px;">
-                    Founded in 2026 in the heart of Ward II, Minglanilla, Cebu City, Philippines, MovieTicketBooking was born from a simple yet powerful idea: making movie ticket booking as enjoyable as watching the film itself. It all started as a class project assigned by our maestro. With four members in our group—all of us passionate movie lovers—we knew right away what we wanted to create. Since we were all huge fans of films, we decided to build something close to our hearts: a movie ticket booking platform. What began as a simple academic requirement quickly became something more meaningful.
+                    Founded in 2026 in the heart of Ward II, Minglanilla, Cebu City, Philippines, MovieTicketBooking was born from a simple yet powerful idea: making movie ticket booking as enjoyable as watching the film itself. It all started as a class project assigned by our maestro. With two members in our group—both passionate movie lovers—we knew right away what we wanted to create. Since we were all huge fans of films, we decided to build something close to our hearts: a movie ticket booking platform. What began as a simple academic requirement quickly became something more meaningful.
                 </p>
                 <p style="color: rgba(255,255,255,0.9); line-height: 1.8;">
                     Today, MovieTicketBooking has grown from a small school project into a trusted platform serving thousands of movie enthusiasts across the Philippines. We partner with major cinema chains to bring you the best selection of movies, showtimes, and seats. Our team works tirelessly to ensure that every booking experience is smooth, secure, and satisfying—because for us, it's not just about booking tickets, it's about sharing the magic of cinema.
@@ -223,37 +222,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_suggestion']))
     <div style="margin-bottom: 60px;">
         <h2 style="color: white; font-size: 2.2rem; text-align: center; margin-bottom: 40px; font-weight: 800;">Meet Our Team</h2>
         
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 30px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 40px; max-width: 800px; margin: 0 auto;">
             <div style="text-align: center;">
-                <div style="width: 150px; height: 150px; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; border: 4px solid rgba(255,255,255,0.2);">
-                    <span style="font-size: 3rem; color: white;">JL</span>
+                <div style="width: 180px; height: 180px; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; border: 4px solid rgba(255,255,255,0.2);">
+                    <span style="font-size: 3.5rem; color: white;">DC</span>
                 </div>
-                <h3 style="color: white; font-size: 1.2rem; font-weight: 700;">Jaylord Lapuña</h3>
-                <p style="color: var(--pale-red);">Lead Developer</p>
+                <h3 style="color: white; font-size: 1.5rem; font-weight: 700;">Denise Kethley Caña</h3>
+                <p style="color: var(--pale-red); font-size: 1.1rem;">Documenter and Database Designer</p>
             </div>
 
             <div style="text-align: center;">
-                <div style="width: 150px; height: 150px; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; border: 4px solid rgba(255,255,255,0.2);">
-                    <span style="font-size: 3rem; color: white;">DC</span>
+                <div style="width: 180px; height: 180px; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; border: 4px solid rgba(255,255,255,0.2);">
+                    <span style="font-size: 3.5rem; color: white;">JL</span>
                 </div>
-                <h3 style="color: white; font-size: 1.2rem; font-weight: 700;">Denise Caña</h3>
-                <p style="color: var(--pale-red);">UI Designer</p>
-            </div>
-
-            <div style="text-align: center;">
-                <div style="width: 150px; height: 150px; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; border: 4px solid rgba(255,255,255,0.2);">
-                    <span style="font-size: 3rem; color: white;">MP</span>
-                </div>
-                <h3 style="color: white; font-size: 1.2rem; font-weight: 700;">Marilyn Papellero</h3>
-                <p style="color: var(--pale-red);">UI/UX Designer</p>
-            </div>
-
-            <div style="text-align: center;">
-                <div style="width: 150px; height: 150px; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; border: 4px solid rgba(255,255,255,0.2);">
-                    <span style="font-size: 3rem; color: white;">MC</span>
-                </div>
-                <h3 style="color: white; font-size: 1.2rem; font-weight: 700;">Martin Contreras</h3>
-                <p style="color: var(--pale-red);">Database Handler</p>
+                <h3 style="color: white; font-size: 1.5rem; font-weight: 700;">Jaylord Laspuña</h3>
+                <p style="color: var(--pale-red); font-size: 1.1rem;">Developer and UI Designer</p>
             </div>
         </div>
     </div>

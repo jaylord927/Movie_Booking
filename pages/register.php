@@ -1,10 +1,5 @@
 <?php
-// pages/register.php
-
-// Go up one level from pages/ to root
 $root_dir = dirname(__DIR__);
-
-// Include config and functions
 require_once $root_dir . '/includes/config.php';
 require_once $root_dir . '/includes/functions.php';
 
@@ -17,9 +12,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = sanitize_input($_POST['email']);
     $password = sanitize_input($_POST['password']);
     $confirm_password = sanitize_input($_POST['confirm_password']);
-    $role = 'Customer'; // Default role
+    $role = 'Customer';
     
-    // Validation
     if (empty($name) || empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
         $error = "All fields are required!";
     } elseif ($password !== $confirm_password) {
@@ -33,7 +27,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $conn = get_db_connection();
         
-        // Check if username already exists
         $check_username_stmt = $conn->prepare("SELECT u_id FROM users WHERE u_username = ?");
         $check_username_stmt->bind_param("s", $username);
         $check_username_stmt->execute();
@@ -45,7 +38,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $check_username_stmt->close();
             
-            // Check if email already exists
             $check_email_stmt = $conn->prepare("SELECT u_id FROM users WHERE u_email = ?");
             $check_email_stmt->bind_param("s", $email);
             $check_email_stmt->execute();
@@ -54,10 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($check_email_result->num_rows > 0) {
                 $error = "Email already registered!";
             } else {
-                // Hash password
                 $hashed_password = password_hash($password, PASSWORD_DEFAULT);
                 
-                // Insert user with username
                 $stmt = $conn->prepare("INSERT INTO users (u_name, u_username, u_email, u_pass, u_role) VALUES (?, ?, ?, ?, ?)");
                 $stmt->bind_param("sssss", $name, $username, $email, $hashed_password, $role);
                 
@@ -65,16 +55,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $user_id = $stmt->insert_id;
                     $success = "Registration successful! You can now login.";
                     
-                    // Auto-login after registration (optional)
-                    // $_SESSION['user_id'] = $user_id;
-                    // $_SESSION['user_name'] = $name;
-                    // $_SESSION['user_username'] = $username;
-                    // $_SESSION['user_email'] = $email;
-                    // $_SESSION['user_role'] = $role;
-                    // header("Location: " . SITE_URL . "index.php?page=customer/browse-movies");
-                    // exit();
-                    
-                    // Clear form
                     $_POST = array();
                 } else {
                     $error = "Registration failed: " . $conn->error;
@@ -127,7 +107,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             min-height: 600px;
         }
         
-        /* Left Side - Register Form */
         .register-form-side {
             flex: 1;
             padding: 50px;
@@ -185,7 +164,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 1.1rem;
         }
         
-        /* Form Styles */
         .form-group {
             margin-bottom: 25px;
             position: relative;
@@ -374,7 +352,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             text-decoration: underline;
         }
         
-        /* Right Side - Benefits */
         .benefits-side {
             flex: 1;
             background: linear-gradient(135deg, rgba(226, 48, 32, 0.1), rgba(193, 27, 24, 0.2));
@@ -457,7 +434,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             line-height: 1.5;
         }
         
-        /* Alerts */
         .alert {
             padding: 15px 20px;
             border-radius: 10px;
@@ -478,7 +454,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border: 1px solid rgba(46, 204, 113, 0.3);
         }
         
-        /* Animations */
         @keyframes slideIn {
             from {
                 opacity: 0;
@@ -496,7 +471,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             100% { transform: scale(1); }
         }
         
-        /* Responsive Design */
         @media (max-width: 992px) {
             .register-wrapper {
                 flex-direction: column;
@@ -545,7 +519,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
     <div class="register-wrapper">
-        <!-- Left Side: Register Form -->
         <div class="register-form-side">
             <div class="back-home">
                 <a href="<?php echo SITE_URL; ?>index.php?page=home">
@@ -574,7 +547,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php endif; ?>
             
             <form method="POST" action="" id="registerForm">
-                <!-- Full Name -->
                 <div class="form-group">
                     <label for="name" class="form-label">
                         <i class="fas fa-user"></i> Full Name
@@ -593,7 +565,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
                 
-                <!-- Username -->
                 <div class="form-group">
                     <label for="username" class="form-label">
                         <i class="fas fa-at"></i> Username
@@ -618,7 +589,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
                 
-                <!-- Email -->
                 <div class="form-group">
                     <label for="email" class="form-label">
                         <i class="fas fa-envelope"></i> Email Address
@@ -636,7 +606,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
                 
-                <!-- Password -->
                 <div class="form-group">
                     <label for="password" class="form-label">
                         <i class="fas fa-lock"></i> Password
@@ -647,7 +616,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                id="password" 
                                name="password" 
                                class="form-control has-icon" 
-                               placeholder="Create a password (min. 6 characters)"
+                               placeholder="•••••••"
                                autocomplete="new-password"
                                required
                                minlength="6">
@@ -661,7 +630,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div id="passwordStrengthText" class="password-strength-text"></div>
                 </div>
                 
-                <!-- Confirm Password -->
                 <div class="form-group">
                     <label for="confirm_password" class="form-label">
                         <i class="fas fa-lock"></i> Confirm Password
@@ -672,7 +640,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                id="confirm_password" 
                                name="confirm_password" 
                                class="form-control has-icon" 
-                               placeholder="Confirm your password"
+                               placeholder="•••••••"
                                autocomplete="new-password"
                                required
                                minlength="6">
@@ -701,7 +669,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
         </div>
         
-        <!-- Right Side: Benefits -->
         <div class="benefits-side">
             <div class="benefits-header">
                 <h2 class="benefits-title">Why Register With Us?</h2>
@@ -777,25 +744,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <script>
     // Password toggle functionality
-    const togglePassword = document.getElementById('togglePassword');
     const passwordField = document.getElementById('password');
-    
-    const toggleConfirmPassword = document.getElementById('toggleConfirmPassword');
     const confirmPasswordField = document.getElementById('confirm_password');
-    
-    togglePassword.addEventListener('click', function() {
-        const type = passwordField.getAttribute('type') === 'password' ? 'text' : 'password';
-        passwordField.setAttribute('type', type);
+
+    const togglePassword = document.getElementById('togglePassword');
+    const toggleConfirmPassword = document.getElementById('toggleConfirmPassword');
+
+    togglePassword.addEventListener('click', function (e) {
+        e.preventDefault();
+        const type = passwordField.type === 'password' ? 'text' : 'password';
+        passwordField.type = type;
+        this.innerHTML = type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+    });
+
+    toggleConfirmPassword.addEventListener('click', function (e) {
+        e.preventDefault();
+        const type = confirmPasswordField.type === 'password' ? 'text' : 'password';
+        confirmPasswordField.type = type;
         this.innerHTML = type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
     });
     
-    toggleConfirmPassword.addEventListener('click', function() {
-        const type = confirmPasswordField.getAttribute('type') === 'password' ? 'text' : 'password';
-        confirmPasswordField.setAttribute('type', type);
-        this.innerHTML = type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
-    });
-    
-    // Username availability check
     const usernameField = document.getElementById('username');
     const usernameCheck = document.getElementById('usernameCheck');
     let usernameCheckTimeout;
@@ -803,7 +771,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     usernameField.addEventListener('input', function() {
         const username = this.value.trim();
         
-        // Clear previous timeout
         clearTimeout(usernameCheckTimeout);
         
         if (username.length < 3) {
@@ -818,24 +785,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             return;
         }
         
-        // Show loading
         usernameCheck.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking username availability...';
         usernameCheck.className = 'username-check loading';
         
-        // Debounce the check
         usernameCheckTimeout = setTimeout(() => {
             checkUsernameAvailability(username);
         }, 500);
     });
     
     function checkUsernameAvailability(username) {
-        // In a real implementation, this would make an AJAX call to the server
-        // For this demo, we'll simulate with a timeout
-        
-        // Simulate API call delay
         setTimeout(() => {
-            // This is a demo - in reality, you would check against your database
-            const takenUsernames = ['admin', 'user', 'test', 'john', 'jane']; // Example taken usernames
+            const takenUsernames = ['admin', 'user', 'test', 'john', 'jane'];
             
             if (takenUsernames.includes(username.toLowerCase())) {
                 usernameCheck.innerHTML = '<i class="fas fa-times-circle"></i> Username already taken';
@@ -847,12 +807,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }, 300);
     }
     
-    // Password strength indicator
-    const passwordField = document.getElementById('password');
+    const passwordFieldStrength = document.getElementById('password');
     const passwordStrengthBar = document.getElementById('passwordStrengthBar');
     const passwordStrengthText = document.getElementById('passwordStrengthText');
     
-    passwordField.addEventListener('input', function() {
+    passwordFieldStrength.addEventListener('input', function() {
         const password = this.value;
         let strength = 0;
         let color = '#e74c3c';
@@ -895,13 +854,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         passwordStrengthText.style.color = color;
     });
     
-    // Password match check
-    const confirmPasswordField = document.getElementById('confirm_password');
+    const confirmPasswordFieldMatch = document.getElementById('confirm_password');
     const passwordMatch = document.getElementById('passwordMatch');
     
     function checkPasswordMatch() {
         const password = passwordField.value;
-        const confirmPassword = confirmPasswordField.value;
+        const confirmPassword = confirmPasswordFieldMatch.value;
         
         if (confirmPassword.length === 0) {
             passwordMatch.innerHTML = '';
@@ -918,9 +876,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     passwordField.addEventListener('input', checkPasswordMatch);
-    confirmPasswordField.addEventListener('input', checkPasswordMatch);
+    confirmPasswordFieldMatch.addEventListener('input', checkPasswordMatch);
     
-    // Form validation
     document.getElementById('registerForm').addEventListener('submit', function(e) {
         const name = document.getElementById('name').value.trim();
         const username = document.getElementById('username').value.trim();
@@ -929,35 +886,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         const confirmPassword = document.getElementById('confirm_password').value;
         const terms = document.getElementById('terms').checked;
         
-        // Check required fields
         if (!name || !username || !email || !password || !confirmPassword) {
             e.preventDefault();
             showAlert('Please fill in all required fields!', 'error');
             return false;
         }
         
-        // Check username format
         if (!/^[a-zA-Z0-9_]{3,50}$/.test(username)) {
             e.preventDefault();
             showAlert('Username must be 3-50 characters and can only contain letters, numbers, and underscores!', 'error');
             return false;
         }
         
-        // Check password length
         if (password.length < 6) {
             e.preventDefault();
             showAlert('Password must be at least 6 characters long!', 'error');
             return false;
         }
         
-        // Check password match
         if (password !== confirmPassword) {
             e.preventDefault();
             showAlert('Passwords do not match!', 'error');
             return false;
         }
         
-        // Check email format
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
             e.preventDefault();
@@ -965,21 +917,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             return false;
         }
         
-        // Check terms agreement
         if (!terms) {
             e.preventDefault();
             showAlert('You must agree to the Terms of Service and Privacy Policy!', 'error');
             return false;
         }
         
-        // Check if username is marked as taken
         if (usernameCheck.classList.contains('taken')) {
             e.preventDefault();
             showAlert('Please choose a different username. This one is already taken!', 'error');
             return false;
         }
         
-        // Disable submit button to prevent double submission
         const submitButton = document.getElementById('submitButton');
         submitButton.disabled = true;
         submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Account...';
@@ -987,7 +936,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         return true;
     });
     
-    // Auto-focus name field
     document.addEventListener('DOMContentLoaded', function() {
         const nameField = document.getElementById('name');
         if (nameField && !nameField.value) {
@@ -995,21 +943,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     });
     
-    // Keyboard shortcuts
     document.addEventListener('keydown', function(e) {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             document.getElementById('registerForm').submit();
         }
         
-        // Escape key to go back
         if (e.key === 'Escape') {
             window.history.back();
         }
     });
     
-    // Alert function
     function showAlert(message, type) {
-        // Remove existing alerts
         const existingAlerts = document.querySelectorAll('.alert');
         existingAlerts.forEach(alert => {
             if (!alert.classList.contains('alert-danger') && !alert.classList.contains('alert-success')) {
@@ -1017,24 +961,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         });
         
-        // Create new alert
         const alertDiv = document.createElement('div');
         alertDiv.className = `alert alert-${type === 'error' ? 'danger' : 'success'}`;
         alertDiv.innerHTML = `<i class="fas fa-${type === 'error' ? 'exclamation-circle' : 'check-circle'}"></i> ${message}`;
         alertDiv.style.animation = 'none';
         alertDiv.style.opacity = '0';
         
-        // Insert after register header
         const registerHeader = document.querySelector('.register-header');
         registerHeader.parentNode.insertBefore(alertDiv, registerHeader.nextSibling);
         
-        // Trigger animation
         setTimeout(() => {
             alertDiv.style.animation = 'slideIn 0.5s ease';
             alertDiv.style.opacity = '1';
         }, 10);
         
-        // Remove alert after 5 seconds
         setTimeout(() => {
             if (alertDiv.parentNode) {
                 alertDiv.style.opacity = '0';
@@ -1048,7 +988,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }, 5000);
     }
     
-    // Add animation to benefit items
     const benefitItems = document.querySelectorAll('.benefit-item');
     benefitItems.forEach((item, index) => {
         item.style.animationDelay = `${index * 0.1}s`;
@@ -1056,7 +995,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         item.style.opacity = '0';
     });
     
-    // Real-time form validation
     function validateForm() {
         const name = document.getElementById('name').value.trim();
         const username = document.getElementById('username').value.trim();
@@ -1068,41 +1006,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         const submitButton = document.getElementById('submitButton');
         let isValid = true;
         
-        // Basic validation
         if (!name || !username || !email || !password || !confirmPassword || !terms) {
             isValid = false;
         }
         
-        // Username validation
         if (!/^[a-zA-Z0-9_]{3,50}$/.test(username)) {
             isValid = false;
         }
         
-        // Password validation
         if (password.length < 6 || password !== confirmPassword) {
             isValid = false;
         }
         
-        // Email validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
             isValid = false;
         }
         
-        // Update button state
         submitButton.disabled = !isValid;
         
         return isValid;
     }
     
-    // Add event listeners for real-time validation
     const formInputs = document.querySelectorAll('#registerForm input');
     formInputs.forEach(input => {
         input.addEventListener('input', validateForm);
         input.addEventListener('change', validateForm);
     });
     
-    // Initial validation
     validateForm();
     </script>
 </body>
