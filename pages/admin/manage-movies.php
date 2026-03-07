@@ -25,6 +25,7 @@ $edit_movie = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_movie'])) {
     $title = htmlspecialchars(trim($_POST['title']));
+    $director = htmlspecialchars(trim($_POST['director'] ?? ''));
     $genre = htmlspecialchars(trim($_POST['genre']));
     $duration = htmlspecialchars(trim($_POST['duration']));
     $rating = htmlspecialchars(trim($_POST['rating']));
@@ -33,7 +34,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_movie'])) {
     $trailer_url = htmlspecialchars(trim($_POST['trailer_url'] ?? ''));
     $venue_name = htmlspecialchars(trim($_POST['venue_name'] ?? ''));
     $venue_location = htmlspecialchars(trim($_POST['venue_location'] ?? ''));
-    $google_maps_link = htmlspecialchars(trim($_POST['google_maps_link'] ?? ''));
     $standard_price = floatval($_POST['standard_price'] ?? 350);
     $premium_price = floatval($_POST['premium_price'] ?? 450);
     $sweet_spot_price = floatval($_POST['sweet_spot_price'] ?? 550);
@@ -41,35 +41,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_movie'])) {
     if (empty($title) || empty($genre) || empty($duration) || empty($rating) || empty($description)) {
         $error = "All required fields must be filled!";
     } else {
-        $check_stmt = $conn->prepare("SELECT id FROM movies WHERE title = ? AND is_active = 1");
-        $check_stmt->bind_param("s", $title);
-        $check_stmt->execute();
-        $check_result = $check_stmt->get_result();
+        $stmt = $conn->prepare("INSERT INTO movies (title, director, genre, duration, rating, description, poster_url, trailer_url, venue_name, venue_location, standard_price, premium_price, sweet_spot_price, is_active, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)");
+        $stmt->bind_param("ssssssssssdddi", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id']);
         
-        if ($check_result->num_rows > 0) {
-            $error = "Movie with this title already exists!";
+        if ($stmt->execute()) {
+            $new_movie_id = $stmt->insert_id;
+            $success = "Movie added successfully! ID: " . $new_movie_id;
+            $_POST = array();
         } else {
-            $stmt = $conn->prepare("INSERT INTO movies (title, genre, duration, rating, description, poster_url, trailer_url, venue_name, venue_location, google_maps_link, standard_price, premium_price, sweet_spot_price, is_active, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)");
-            $stmt->bind_param("ssssssssssdddi", $title, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $google_maps_link, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id']);
-            
-            if ($stmt->execute()) {
-                $new_movie_id = $stmt->insert_id;
-                $success = "Movie added successfully! ID: " . $new_movie_id;
-                $_POST = array();
-            } else {
-                $error = "Failed to add movie: " . $conn->error;
-            }
-            
-            $stmt->close();
+            $error = "Failed to add movie: " . $conn->error;
         }
         
-        $check_stmt->close();
+        $stmt->close();
     }
 }
 
 elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_movie'])) {
     $id = intval($_POST['id']);
     $title = htmlspecialchars(trim($_POST['title']));
+    $director = htmlspecialchars(trim($_POST['director'] ?? ''));
     $genre = htmlspecialchars(trim($_POST['genre']));
     $duration = htmlspecialchars(trim($_POST['duration']));
     $rating = htmlspecialchars(trim($_POST['rating']));
@@ -78,13 +68,12 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_movie'])) 
     $trailer_url = htmlspecialchars(trim($_POST['trailer_url'] ?? ''));
     $venue_name = htmlspecialchars(trim($_POST['venue_name'] ?? ''));
     $venue_location = htmlspecialchars(trim($_POST['venue_location'] ?? ''));
-    $google_maps_link = htmlspecialchars(trim($_POST['google_maps_link'] ?? ''));
     $standard_price = floatval($_POST['standard_price'] ?? 350);
     $premium_price = floatval($_POST['premium_price'] ?? 450);
     $sweet_spot_price = floatval($_POST['sweet_spot_price'] ?? 550);
     
-    $stmt = $conn->prepare("UPDATE movies SET title = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, venue_name = ?, venue_location = ?, google_maps_link = ?, standard_price = ?, premium_price = ?, sweet_spot_price = ?, updated_by = ? WHERE id = ?");
-    $stmt->bind_param("ssssssssssddiii", $title, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $google_maps_link, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id'], $id);
+    $stmt = $conn->prepare("UPDATE movies SET title = ?, director = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, venue_name = ?, venue_location = ?, standard_price = ?, premium_price = ?, sweet_spot_price = ?, updated_by = ? WHERE id = ?");
+    $stmt->bind_param("ssssssssssddiii", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id'], $id);
     
     if ($stmt->execute()) {
         $success = "Movie updated successfully!";
@@ -202,6 +191,16 @@ $conn->close();
                 
                 <div>
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
+                        <i class="fas fa-user"></i> Director
+                    </label>
+                    <input type="text" id="director" name="director" 
+                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['director'] ?? '') : (isset($_POST['director']) ? htmlspecialchars($_POST['director']) : ''); ?>"
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
+                           placeholder="Enter director's name">
+                </div>
+                
+                <div>
+                    <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-tag"></i> Genre *
                     </label>
                     <input type="text" id="genre" name="genre" required
@@ -297,9 +296,6 @@ $conn->close();
                        value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['google_maps_link'] ?? '') : (isset($_POST['google_maps_link']) ? htmlspecialchars($_POST['google_maps_link']) : ''); ?>"
                        style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
                        placeholder="https://maps.google.com/?q=10.273055307646723,123.7611768131498">
-                <div style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem; margin-top: 5px;">
-                    <i class="fas fa-info-circle"></i> Example: https://maps.google.com/?q=10.273055307646723,123.7611768131498
-                </div>
             </div>
 
             <div style="margin-bottom: 30px;">
@@ -375,12 +371,13 @@ $conn->close();
         </div>
         <?php else: ?>
         <div style="overflow-x: auto; border-radius: 10px; border: 1px solid rgba(52, 152, 219, 0.2);">
-            <table style="width: 100%; border-collapse: collapse; min-width: 1400px;">
+            <table style="width: 100%; border-collapse: collapse; min-width: 1500px;">
                 <thead>
                     <tr>
                         <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">ID</th>
                         <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Poster</th>
                         <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Movie Details</th>
+                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Director</th>
                         <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Seat Prices</th>
                         <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Venue</th>
                         <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Google Maps</th>
@@ -398,7 +395,7 @@ $conn->close();
                             <img src="<?php echo $movie['poster_url']; ?>" 
                                  alt="<?php echo htmlspecialchars($movie['title']); ?>"
                                  style="width: 70px; height: 100px; object-fit: cover; border-radius: 8px; border: 2px solid rgba(52, 152, 219, 0.3);"
-                                 onerror="this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 70 100\"><rect width=\"70\" height=\"100\" fill=\"%232c3e50\"/><text x=\"50%\" y=\"50%\" font-family=\"Arial\" font-size=\"14\" fill=\"%23ecf0f1\" text-anchor=\"middle\" dy=\".3em\">No Image</text></svg>'">
+                                 onerror="this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 70 100\"><rect width=\"70\" height=\"100\" fill=\"%232c3e50\"/></svg>'">
                             <?php else: ?>
                             <div style="width: 70px; height: 100px; background: rgba(52, 152, 219, 0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 2px solid rgba(52, 152, 219, 0.2);">
                                 <i class="fas fa-film" style="color: rgba(52, 152, 219, 0.5); font-size: 1.8rem;"></i>
@@ -420,6 +417,9 @@ $conn->close();
                                 <?php echo substr(htmlspecialchars($movie['description']), 0, 120); ?>...
                             </p>
                             <?php endif; ?>
+                        </td>
+                        <td style="padding: 16px; color: rgba(255, 255, 255, 0.8);">
+                            <?php echo htmlspecialchars($movie['director'] ?? 'N/A'); ?>
                         </td>
                         <td style="padding: 16px;">
                             <div style="background: rgba(52, 152, 219, 0.1); padding: 12px; border-radius: 8px;">

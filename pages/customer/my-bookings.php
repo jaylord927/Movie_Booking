@@ -17,6 +17,16 @@ $conn = get_db();
 $error = '';
 $success = '';
 
+$auto_cancel_stmt = $conn->prepare("
+    UPDATE tbl_booking 
+    SET status = 'Cancelled', payment_status = 'Refunded' 
+    WHERE u_id = ? AND payment_status = 'Pending' AND status = 'Ongoing'
+    AND TIMESTAMPDIFF(HOUR, booking_date, NOW()) >= 3
+");
+$auto_cancel_stmt->bind_param("i", $user_id);
+$auto_cancel_stmt->execute();
+$auto_cancel_stmt->close();
+
 if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
     $booking_id = intval($_GET['cancel']);
     
@@ -147,6 +157,7 @@ $bookings_stmt = $conn->prepare("
         m.duration,
         m.rating,
         TIMESTAMPDIFF(HOUR, NOW(), CONCAT(b.show_date, ' ', b.showtime)) as hours_until_show,
+        TIMESTAMPDIFF(HOUR, b.booking_date, NOW()) as hours_since_booking,
         CASE 
             WHEN b.status = 'Cancelled' THEN 'cancelled'
             WHEN b.status = 'Done' THEN 'completed'
@@ -338,6 +349,8 @@ require_once $root_dir . '/partials/header.php';
                 $is_upcoming = $booking['booking_status'] == 'upcoming';
                 $is_paid = $booking['payment_status'] == 'Paid';
                 
+                $border_color = $is_cancelled ? '#e74c3c' : '#2ecc71';
+                
                 $status_bg = '';
                 $status_color = '';
                 $status_icon = '';
@@ -363,8 +376,8 @@ require_once $root_dir . '/partials/header.php';
                     $status_icon = 'fa-clock';
                     $status_text = 'Upcoming';
                 } else {
-                    $status_bg = 'rgba(52, 152, 219, 0.2)';
-                    $status_color = '#3498db';
+                    $status_bg = 'rgba(46, 204, 113, 0.2)';
+                    $status_color = '#2ecc71';
                     $status_icon = 'fa-ticket-alt';
                     $status_text = 'Active';
                 }
@@ -378,14 +391,28 @@ require_once $root_dir . '/partials/header.php';
                 if (!$is_cancelled && !$is_completed && !$is_expired) {
                     if ($hours > 24) {
                         $days = floor($hours / 24);
-                        $time_remaining = "$days day" . ($days > 1 ? 's' : '') . ' left';
+                        $time_remaining = "$days day" . ($days > 1 ? 's' : '') . ' left – available at the cinema';
                     } elseif ($hours > 0) {
-                        $time_remaining = "$hours hour" . ($hours > 1 ? 's' : '') . ' left';
+                        $time_remaining = "$hours hour" . ($hours > 1 ? 's' : '') . ' left – available at the cinema';
+                    }
+                }
+                
+                $hours_since_booking = $booking['hours_since_booking'];
+                $payment_hours_left = 3 - $hours_since_booking;
+                $payment_time_remaining = '';
+                if (!$is_paid && !$is_cancelled && !$is_completed && !$is_expired && $payment_hours_left > 0) {
+                    if ($payment_hours_left >= 1) {
+                        $payment_time_remaining = floor($payment_hours_left) . ' hour' . (floor($payment_hours_left) > 1 ? 's' : '') . ' left to pay';
+                    } else {
+                        $minutes_left = round($payment_hours_left * 60);
+                        $payment_time_remaining = $minutes_left . ' minute' . ($minutes_left > 1 ? 's' : '') . ' left to pay';
                     }
                 }
             ?>
             <div style="background: rgba(255, 255, 255, 0.05); border-radius: 12px; overflow: hidden;
-                 border: 1px solid rgba(226, 48, 32, 0.2); transition: all 0.3s ease;">
+                 border: 2px solid <?php echo $border_color; ?>; transition: all 0.3s ease;"
+                 onmouseover="this.style.borderColor='<?php echo $is_cancelled ? '#c0392b' : '#27ae60'; ?>'"
+                 onmouseout="this.style.borderColor='<?php echo $border_color; ?>'">
                 <div style="display: flex; gap: 25px; padding: 25px; 
                      <?php echo $is_cancelled ? 'opacity: 0.8;' : ''; ?>
                      <?php echo $is_expired ? 'opacity: 0.7;' : ''; ?>">
@@ -441,12 +468,6 @@ require_once $root_dir . '/partials/header.php';
                                     <i class="fas <?php echo $is_paid ? 'fa-check-circle' : 'fa-exclamation-circle'; ?>"></i> 
                                     <?php echo $payment_text; ?>
                                 </span>
-                                
-                                <?php if ($time_remaining && !$is_cancelled && !$is_completed): ?>
-                                <span style="color: var(--pale-red); font-size: 0.8rem; font-weight: 600;">
-                                    <i class="fas fa-hourglass-half"></i> <?php echo $time_remaining; ?>
-                                </span>
-                                <?php endif; ?>
                             </div>
                         </div>
                         
@@ -487,49 +508,65 @@ require_once $root_dir . '/partials/header.php';
                             </div>
                         </div>
                         
-                        <div style="display: flex; flex-wrap: wrap; gap: 12px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
-                            <a href="<?php echo SITE_URL; ?>index.php?page=customer/receipt&id=<?php echo $booking['b_id']; ?>" target="_blank" 
-                               class="btn btn-secondary" style="padding: 10px 20px;">
-                                <i class="fas fa-print"></i> Print Receipt
-                            </a>
+                        <div style="display: flex; flex-wrap: wrap; gap: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); align-items: center;">
+                            <div style="display: flex; flex-wrap: wrap; gap: 12px; flex: 1;">
+                                <?php if ($payment_time_remaining): ?>
+                                <span style="background: rgba(241, 196, 15, 0.2); color: #f1c40f; padding: 8px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: 700; display: inline-flex; align-items: center; gap: 8px;">
+                                    <i class="fas fa-hourglass-half"></i> <?php echo $payment_time_remaining; ?>
+                                </span>
+                                <?php endif; ?>
+                                
+                                <?php if ($time_remaining && !$is_cancelled && !$is_completed): ?>
+                                <span style="color: var(--pale-red); font-size: 0.9rem; font-weight: 600; display: inline-flex; align-items: center; gap: 8px;">
+                                    <i class="fas fa-hourglass-half"></i> <?php echo $time_remaining; ?>
+                                </span>
+                                <?php endif; ?>
+                            </div>
                             
-                            <?php if (!$is_paid && !$is_cancelled && !$is_completed && !$is_expired): ?>
-                            <a href="?page=customer/my-bookings&pay=<?php echo $booking['b_id']; ?>" 
-                               class="btn btn-primary" style="padding: 10px 20px;"
-                               onclick="return confirm('Proceed to payment for this booking? The payment status will remain Not Paid until payment is completed.')">
-                                <i class="fas fa-credit-card"></i> Payment
-                            </a>
-                            <?php endif; ?>
-                            
-                            <?php if ($booking['movie_id']): ?>
-                                <?php if ($is_cancelled): ?>
-                                <a href="<?php echo SITE_URL; ?>index.php?page=customer/booking&movie=<?php echo $booking['movie_id']; ?>" 
-                                   class="btn btn-primary" style="padding: 10px 20px;">
-                                    <i class="fas fa-redo-alt"></i> Book Again This Movie
+                            <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+                                <a href="<?php echo SITE_URL; ?>index.php?page=customer/receipt&id=<?php echo $booking['b_id']; ?>" target="_blank" 
+                                   class="btn btn-secondary" style="padding: 10px 20px;">
+                                    <i class="fas fa-print"></i> Print Receipt
                                 </a>
-                                <?php elseif (!$is_cancelled && !$is_completed && !$is_expired && $booking['movie_id']): ?>
-                                <a href="<?php echo SITE_URL; ?>index.php?page=customer/booking&movie=<?php echo $booking['movie_id']; ?>" 
-                                   class="btn btn-primary" style="padding: 10px 20px;">
-                                    <i class="fas fa-plus-circle"></i> Add Another Ticket
+                                
+                                <?php if (!$is_paid && !$is_cancelled && !$is_completed && !$is_expired): ?>
+                                <a href="?page=customer/my-bookings&pay=<?php echo $booking['b_id']; ?>" 
+                                   class="btn btn-primary" style="padding: 10px 20px;"
+                                   onclick="return confirm('Proceed to payment for this booking?')">
+                                    <i class="fas fa-credit-card"></i> Pay Now
                                 </a>
                                 <?php endif; ?>
-                            <?php endif; ?>
-                            
-                            <?php if (!$is_cancelled && !$is_completed && !$is_expired && $booking['hours_until_show'] > 2): ?>
-                            <a href="?page=customer/my-bookings&cancel=<?php echo $booking['b_id']; ?>" 
-                               class="btn btn-danger" style="padding: 10px 20px;"
-                               onclick="return confirm('Are you sure you want to cancel this booking?\n\nMovie: <?php echo addslashes($booking['movie_name']); ?>\nShow: <?php echo $show_date; ?> <?php echo $show_time; ?>\nSeats: <?php echo addslashes($booking['seat_no']); ?>\n\nA refund will be processed.')">
-                                <i class="fas fa-times"></i> Cancel Booking
-                            </a>
-                            <?php endif; ?>
-                            
-                            <?php if ($is_cancelled || $is_expired): ?>
-                            <a href="?page=customer/my-bookings&remove=<?php echo $booking['b_id']; ?>" 
-                               class="btn btn-danger" style="padding: 10px 20px;"
-                               onclick="return confirm('Are you sure you want to remove this booking from your history?')">
-                                <i class="fas fa-trash"></i> Remove
-                            </a>
-                            <?php endif; ?>
+                                
+                                <?php if ($booking['movie_id']): ?>
+                                    <?php if ($is_cancelled): ?>
+                                    <a href="<?php echo SITE_URL; ?>index.php?page=customer/booking&movie=<?php echo $booking['movie_id']; ?>" 
+                                       class="btn btn-primary" style="padding: 10px 20px;">
+                                        <i class="fas fa-redo-alt"></i> Book Again
+                                    </a>
+                                    <?php elseif (!$is_cancelled && !$is_completed && !$is_expired && $booking['movie_id']): ?>
+                                    <a href="<?php echo SITE_URL; ?>index.php?page=customer/booking&movie=<?php echo $booking['movie_id']; ?>" 
+                                       class="btn btn-primary" style="padding: 10px 20px;">
+                                        <i class="fas fa-plus-circle"></i> Add Another
+                                    </a>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                                
+                                <?php if (!$is_cancelled && !$is_completed && !$is_expired && $booking['hours_until_show'] > 2): ?>
+                                <a href="?page=customer/my-bookings&cancel=<?php echo $booking['b_id']; ?>" 
+                                   class="btn btn-danger" style="padding: 10px 20px;"
+                                   onclick="return confirm('Are you sure you want to cancel this booking?\n\nMovie: <?php echo addslashes($booking['movie_name']); ?>\nShow: <?php echo $show_date; ?> <?php echo $show_time; ?>\nSeats: <?php echo addslashes($booking['seat_no']); ?>\n\nA refund will be processed.')">
+                                    <i class="fas fa-times"></i> Cancel
+                                </a>
+                                <?php endif; ?>
+                                
+                                <?php if ($is_cancelled || $is_expired): ?>
+                                <a href="?page=customer/my-bookings&remove=<?php echo $booking['b_id']; ?>" 
+                                   class="btn btn-danger" style="padding: 10px 20px;"
+                                   onclick="return confirm('Are you sure you want to remove this booking from your history?')">
+                                    <i class="fas fa-trash"></i> Remove
+                                </a>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                 </div>

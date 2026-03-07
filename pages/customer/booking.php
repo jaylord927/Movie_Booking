@@ -15,6 +15,22 @@ $user_id = $_SESSION['user_id'];
 $error = '';
 $success = '';
 $selected_seats = [];
+$pending_booking = null;
+
+// Check for pending booking
+$pending_stmt = $conn->prepare("
+    SELECT * FROM tbl_booking 
+    WHERE u_id = ? AND payment_status = 'Pending' AND status = 'Ongoing'
+    AND TIMESTAMPDIFF(HOUR, booking_date, NOW()) < 3
+    ORDER BY booking_date DESC LIMIT 1
+");
+$pending_stmt->bind_param("i", $user_id);
+$pending_stmt->execute();
+$pending_result = $pending_stmt->get_result();
+if ($pending_result->num_rows > 0) {
+    $pending_booking = $pending_result->fetch_assoc();
+}
+$pending_stmt->close();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['confirm_booking'])) {
@@ -68,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $conn->begin_transaction();
                         
                         try {
-                            $booking_reference = 'BK' . date('Ymd') . str_pad(rand(0, 9999), 4, '0', STR_PAD_LEFT);
+                            $booking_reference = 'BK' . date('YmdHis') . str_pad(rand(0, 99), 2, '0', STR_PAD_LEFT);
                             $seat_numbers = implode(', ', $selected_seats);
                             
                             $total_fee = 0;
@@ -85,8 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $booking_stmt = $conn->prepare("
                                 INSERT INTO tbl_booking (
                                     u_id, movie_name, show_date, showtime, 
-                                    seat_no, booking_fee, status, booking_reference
-                                ) VALUES (?, ?, ?, ?, ?, ?, 'Ongoing', ?)
+                                    seat_no, booking_fee, status, booking_reference, payment_status
+                                ) VALUES (?, ?, ?, ?, ?, ?, 'Ongoing', ?, 'Pending')
                             ");
                             $booking_stmt->bind_param(
                                 "issssds",
@@ -138,6 +154,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             
                             $success = "Booking confirmed! Reference: <strong>$booking_reference</strong>";
                             $selected_seats = [];
+                            $pending_booking = [
+                                'b_id' => $booking_id,
+                                'booking_reference' => $booking_reference,
+                                'booking_fee' => $total_fee,
+                                'movie_name' => $schedule['movie_title'],
+                                'show_date' => $schedule['show_date'],
+                                'showtime' => $schedule['showtime'],
+                                'seat_no' => $seat_numbers
+                            ];
                             
                         } catch (Exception $e) {
                             $conn->rollback();
@@ -268,6 +293,34 @@ require_once $root_dir . '/partials/header.php';
 ?>
 
 <div class="main-container" style="max-width: 1400px; margin: 0 auto; padding: 20px;">
+    <?php if ($pending_booking): ?>
+    <div style="background: rgba(241, 196, 15, 0.2); border: 2px solid #f1c40f; border-radius: 15px; padding: 25px; margin-bottom: 30px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
+        <div style="display: flex; align-items: center; gap: 20px;">
+            <div style="font-size: 2.5rem; color: #f1c40f;">
+                <i class="fas fa-clock"></i>
+            </div>
+            <div>
+                <h3 style="color: white; font-size: 1.3rem; margin-bottom: 5px; font-weight: 700;">Pending Payment</h3>
+                <p style="color: var(--pale-red); margin-bottom: 5px;">
+                    You have a pending booking: <strong><?php echo $pending_booking['movie_name']; ?></strong> 
+                    (<?php echo date('M d, h:i A', strtotime($pending_booking['show_date'] . ' ' . $pending_booking['showtime'])); ?>)
+                </p>
+                <p style="color: #f1c40f; font-size: 0.9rem;">
+                    <i class="fas fa-exclamation-triangle"></i> Complete payment within 3 hours or booking will be automatically cancelled.
+                </p>
+            </div>
+        </div>
+        <div style="display: flex; gap: 15px;">
+            <a href="#" class="btn btn-primary" style="padding: 12px 25px;">
+                <i class="fas fa-credit-card"></i> Pay Now (₱<?php echo number_format($pending_booking['booking_fee'], 2); ?>)
+            </a>
+            <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" class="btn btn-secondary" style="padding: 12px 25px;">
+                <i class="fas fa-ticket-alt"></i> View My Bookings
+            </a>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
          border-radius: 15px; padding: 25px; margin-bottom: 30px; 
          border: 1px solid rgba(226, 48, 32, 0.3);">
@@ -318,14 +371,20 @@ require_once $root_dir . '/partials/header.php';
     
     <?php if ($success): ?>
         <div class="alert alert-success" style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; 
-             padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; border: 1px solid rgba(46, 204, 113, 0.3);
-             display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-check-circle fa-lg"></i>
-            <div><?php echo $success; ?></div>
-            <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" 
-               class="btn btn-secondary" style="margin-left: auto; padding: 8px 15px; font-size: 0.9rem;">
-                <i class="fas fa-ticket-alt"></i> View My Bookings
-            </a>
+             padding: 20px; border-radius: 10px; margin-bottom: 25px; border: 1px solid rgba(46, 204, 113, 0.3);
+             display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <i class="fas fa-check-circle fa-lg"></i>
+                <div><?php echo $success; ?></div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <a href="#" class="btn btn-primary" style="padding: 10px 20px;">
+                    <i class="fas fa-credit-card"></i> Payment
+                </a>
+                <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" class="btn btn-secondary" style="padding: 10px 20px;">
+                    <i class="fas fa-ticket-alt"></i> View My Bookings
+                </a>
+            </div>
         </div>
     <?php endif; ?>
     
@@ -730,6 +789,15 @@ require_once $root_dir . '/partials/header.php';
                                 <div style="color: var(--primary-red); font-weight: 900; font-size: 1.4rem;">
                                     ₱<span id="summaryTotal">0</span>.00
                                 </div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 20px; background: rgba(241, 196, 15, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #f1c40f;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <i class="fas fa-clock" style="color: #f1c40f;"></i>
+                                <span style="color: white; font-size: 0.9rem;">
+                                    Complete payment within <strong>3 hours</strong> or booking will be automatically cancelled.
+                                </span>
                             </div>
                         </div>
                     </div>

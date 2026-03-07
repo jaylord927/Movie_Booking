@@ -53,12 +53,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_schedule'])) {
         if ($check_result->num_rows > 0) {
             $error = "Schedule already exists for this movie at the same date and time!";
         } else {
-            $stmt = $conn->prepare("INSERT INTO movie_schedules (movie_id, movie_title, show_date, showtime, total_seats, available_seats, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)");
-            $available_seats = $total_seats;
-            $stmt->bind_param("isssii", $movie_id, $movie_title, $show_date, $showtime, $total_seats, $available_seats);
+            $conn->begin_transaction();
             
-            if ($stmt->execute()) {
+            try {
+                $stmt = $conn->prepare("INSERT INTO movie_schedules (movie_id, movie_title, show_date, showtime, total_seats, available_seats, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)");
+                $available_seats = $total_seats;
+                $stmt->bind_param("isssii", $movie_id, $movie_title, $show_date, $showtime, $total_seats, $available_seats);
+                
+                if (!$stmt->execute()) {
+                    throw new Exception("Failed to add schedule: " . $stmt->error);
+                }
+                
                 $new_schedule_id = $stmt->insert_id;
+                $stmt->close();
                 
                 $seat_stmt = $conn->prepare("INSERT INTO seat_availability (schedule_id, movie_title, show_date, showtime, seat_number, seat_type, is_available, price) VALUES (?, ?, ?, ?, ?, ?, 1, ?)");
                 
@@ -80,17 +87,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_schedule'])) {
                     }
                     
                     $seat_stmt->bind_param("isssssd", $new_schedule_id, $movie_title, $show_date, $showtime, $seat_number, $seat_type, $price);
-                    $seat_stmt->execute();
+                    
+                    if (!$seat_stmt->execute()) {
+                        throw new Exception("Failed to add seat $seat_number: " . $seat_stmt->error);
+                    }
                 }
                 
                 $seat_stmt->close();
+                $conn->commit();
+                
                 $success = "Schedule added successfully! " . $total_seats . " seats created with prices from movie settings.";
                 $_POST = array();
-            } else {
-                $error = "Failed to add schedule: " . $conn->error;
+                
+            } catch (Exception $e) {
+                $conn->rollback();
+                $error = $e->getMessage();
             }
-            
-            $stmt->close();
         }
         $check_stmt->close();
     }
@@ -103,7 +115,7 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_schedule']
     $showtime = htmlspecialchars(trim($_POST['showtime']));
     $total_seats = intval($_POST['total_seats']);
     
-    $current_stmt = $conn->prepare("SELECT movie_title FROM movie_schedules WHERE id = ?");
+    $current_stmt = $conn->prepare("SELECT movie_title, total_seats FROM movie_schedules WHERE id = ?");
     $current_stmt->bind_param("i", $id);
     $current_stmt->execute();
     $current_result = $current_stmt->get_result();
@@ -118,22 +130,105 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_schedule']
     $movie_title = $movie['title'];
     $movie_stmt->close();
     
-    $stmt = $conn->prepare("UPDATE movie_schedules SET movie_id = ?, movie_title = ?, show_date = ?, showtime = ?, total_seats = ? WHERE id = ?");
-    $stmt->bind_param("isssii", $movie_id, $movie_title, $show_date, $showtime, $total_seats, $id);
+    $conn->begin_transaction();
     
-    if ($stmt->execute()) {
+    try {
+        $stmt = $conn->prepare("UPDATE movie_schedules SET movie_id = ?, movie_title = ?, show_date = ?, showtime = ?, total_seats = ? WHERE id = ?");
+        $stmt->bind_param("isssii", $movie_id, $movie_title, $show_date, $showtime, $total_seats, $id);
+        
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to update schedule: " . $stmt->error);
+        }
+        $stmt->close();
+        
         if ($current_schedule['movie_title'] !== $movie_title) {
             $update_seat_stmt = $conn->prepare("UPDATE seat_availability SET movie_title = ? WHERE schedule_id = ?");
             $update_seat_stmt->bind_param("si", $movie_title, $id);
-            $update_seat_stmt->execute();
+            
+            if (!$update_seat_stmt->execute()) {
+                throw new Exception("Failed to update seat titles: " . $update_seat_stmt->error);
+            }
             $update_seat_stmt->close();
         }
         
+        if ($total_seats != $current_schedule['total_seats']) {
+            $count_stmt = $conn->prepare("SELECT COUNT(*) as count, SUM(CASE WHEN is_available = 0 THEN 1 ELSE 0 END) as booked FROM seat_availability WHERE schedule_id = ?");
+            $count_stmt->bind_param("i", $id);
+            $count_stmt->execute();
+            $count_result = $count_stmt->get_result();
+            $seat_data = $count_result->fetch_assoc();
+            $current_count = $seat_data['count'];
+            $booked_count = $seat_data['booked'];
+            $count_stmt->close();
+            
+            if ($total_seats < $current_count) {
+                if ($booked_count > 0) {
+                    throw new Exception("Cannot reduce seats. There are $booked_count booked seats for this schedule.");
+                }
+                
+                $delete_stmt = $conn->prepare("DELETE FROM seat_availability WHERE schedule_id = ? ORDER BY id DESC LIMIT ?");
+                $delete_count = $current_count - $total_seats;
+                $delete_stmt->bind_param("ii", $id, $delete_count);
+                
+                if (!$delete_stmt->execute()) {
+                    throw new Exception("Failed to remove excess seats: " . $delete_stmt->error);
+                }
+                $delete_stmt->close();
+                
+            } elseif ($total_seats > $current_count) {
+                $movie_prices_stmt = $conn->prepare("SELECT standard_price, premium_price, sweet_spot_price FROM movies WHERE id = ?");
+                $movie_prices_stmt->bind_param("i", $movie_id);
+                $movie_prices_stmt->execute();
+                $movie_prices_result = $movie_prices_stmt->get_result();
+                $movie_prices = $movie_prices_result->fetch_assoc();
+                $movie_prices_stmt->close();
+                
+                $standard_price = $movie_prices['standard_price'] ?? 350.00;
+                $premium_price = $movie_prices['premium_price'] ?? 450.00;
+                $sweet_spot_price = $movie_prices['sweet_spot_price'] ?? 550.00;
+                
+                $seat_stmt = $conn->prepare("INSERT INTO seat_availability (schedule_id, movie_title, show_date, showtime, seat_number, seat_type, is_available, price) VALUES (?, ?, ?, ?, ?, ?, 1, ?)");
+                
+                for ($i = $current_count + 1; $i <= $total_seats; $i++) {
+                    $row_number = ceil($i / 10);
+                    $row_letter = chr(64 + $row_number);
+                    $seat_in_row = (($i - 1) % 10) + 1;
+                    $seat_number = $row_letter . str_pad($seat_in_row, 2, '0', STR_PAD_LEFT);
+                    
+                    $seat_type = 'Standard';
+                    $price = $standard_price;
+                    
+                    if ($i >= 1 && $i <= 10) {
+                        $seat_type = 'Premium';
+                        $price = $premium_price;
+                    } elseif ($i >= 31 && $i <= 40) {
+                        $seat_type = 'Sweet Spot';
+                        $price = $sweet_spot_price;
+                    }
+                    
+                    $seat_stmt->bind_param("isssssd", $id, $movie_title, $show_date, $showtime, $seat_number, $seat_type, $price);
+                    
+                    if (!$seat_stmt->execute()) {
+                        throw new Exception("Failed to add seat $seat_number: " . $seat_stmt->error);
+                    }
+                }
+                
+                $seat_stmt->close();
+            }
+            
+            $update_available = $conn->prepare("UPDATE movie_schedules SET available_seats = total_seats - (SELECT COUNT(*) FROM seat_availability WHERE schedule_id = ? AND is_available = 0) WHERE id = ?");
+            $update_available->bind_param("ii", $id, $id);
+            $update_available->execute();
+            $update_available->close();
+        }
+        
+        $conn->commit();
         $success = "Schedule updated successfully!";
-    } else {
-        $error = "Failed to update schedule: " . $stmt->error;
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        $error = $e->getMessage();
     }
-    $stmt->close();
 }
 
 elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
@@ -156,52 +251,32 @@ elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     if ($booking_data['booking_count'] > 0) {
         $error = "Cannot delete schedule. There are active bookings for this schedule.";
     } else {
-        $stmt = $conn->prepare("UPDATE movie_schedules SET is_active = 0 WHERE id = ?");
-        $stmt->bind_param("i", $id);
+        $conn->begin_transaction();
         
-        if ($stmt->execute()) {
-            $success = "Schedule deleted successfully!";
-        } else {
-            $error = "Failed to delete schedule: " . $stmt->error;
-        }
-        $stmt->close();
-    }
-}
-
-elseif (isset($_GET['manage_seats']) && is_numeric($_GET['manage_seats'])) {
-    $schedule_id = intval($_GET['manage_seats']);
-    
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_seat_types'])) {
-        foreach ($_POST['seat_type'] as $seat_id => $seat_type) {
-            $movie_prices = $conn->prepare("
-                SELECT m.standard_price, m.premium_price, m.sweet_spot_price 
-                FROM seat_availability sa
-                JOIN movie_schedules ms ON sa.schedule_id = ms.id
-                JOIN movies m ON ms.movie_id = m.id
-                WHERE sa.id = ?
-            ");
-            $movie_prices->bind_param("i", $seat_id);
-            $movie_prices->execute();
-            $prices_result = $movie_prices->get_result();
-            $prices = $prices_result->fetch_assoc();
-            $movie_prices->close();
+        try {
+            $delete_seats = $conn->prepare("DELETE FROM seat_availability WHERE schedule_id = ?");
+            $delete_seats->bind_param("i", $id);
             
-            $price = 350.00;
-            if ($seat_type === 'Premium') {
-                $price = $prices['premium_price'] ?? 450.00;
-            } elseif ($seat_type === 'Sweet Spot') {
-                $price = $prices['sweet_spot_price'] ?? 550.00;
-            } else {
-                $price = $prices['standard_price'] ?? 350.00;
+            if (!$delete_seats->execute()) {
+                throw new Exception("Failed to delete seats: " . $delete_seats->error);
             }
+            $delete_seats->close();
             
-            $update_stmt = $conn->prepare("UPDATE seat_availability SET seat_type = ?, price = ? WHERE id = ?");
-            $update_stmt->bind_param("sdi", $seat_type, $price, $seat_id);
-            $update_stmt->execute();
-            $update_stmt->close();
+            $stmt = $conn->prepare("UPDATE movie_schedules SET is_active = 0 WHERE id = ?");
+            $stmt->bind_param("i", $id);
+            
+            if (!$stmt->execute()) {
+                throw new Exception("Failed to delete schedule: " . $stmt->error);
+            }
+            $stmt->close();
+            
+            $conn->commit();
+            $success = "Schedule deleted successfully!";
+            
+        } catch (Exception $e) {
+            $conn->rollback();
+            $error = $e->getMessage();
         }
-        
-        $success = "Seat types updated successfully!";
     }
 }
 
@@ -251,40 +326,6 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
     }
 }
 
-if (isset($_GET['manage_seats']) && is_numeric($_GET['manage_seats'])) {
-    $manage_id = intval($_GET['manage_seats']);
-    $seat_stmt = $conn->prepare("
-        SELECT sa.*, m.standard_price, m.premium_price, m.sweet_spot_price
-        FROM seat_availability sa
-        JOIN movie_schedules ms ON sa.schedule_id = ms.id
-        JOIN movies m ON ms.movie_id = m.id
-        WHERE sa.schedule_id = ? 
-        ORDER BY sa.seat_number
-    ");
-    $seat_stmt->bind_param("i", $manage_id);
-    $seat_stmt->execute();
-    $seat_result = $seat_stmt->get_result();
-    $seats = [];
-    while ($row = $seat_result->fetch_assoc()) {
-        $seats[] = $row;
-    }
-    $seat_stmt->close();
-    
-    $schedule_info = $conn->prepare("
-        SELECT s.*, m.title as movie_title_full, m.standard_price, m.premium_price, m.sweet_spot_price
-        FROM movie_schedules s
-        LEFT JOIN movies m ON s.movie_id = m.id
-        WHERE s.id = ?
-    ");
-    $schedule_info->bind_param("i", $manage_id);
-    $schedule_info->execute();
-    $schedule_result = $schedule_info->get_result();
-    $current_schedule = $schedule_result->fetch_assoc();
-    $schedule_info->close();
-    
-    echo "<script>console.log('Total seats in database: " . count($seats) . "');</script>";
-}
-
 $count_result = $conn->query("SELECT COUNT(*) as total FROM movie_schedules WHERE is_active = 1");
 $schedule_count = $count_result ? $count_result->fetch_assoc()['total'] : 0;
 
@@ -294,7 +335,7 @@ $conn->close();
 <div class="admin-content" style="max-width: 1400px; margin: 0 auto; padding: 30px;">
     <div style="text-align: center; margin-bottom: 40px; padding: 30px; background: linear-gradient(135deg, rgba(52, 152, 219, 0.1), rgba(41, 128, 185, 0.2)); border-radius: 20px; border: 2px solid rgba(52, 152, 219, 0.3);">
         <h1 style="color: white; font-size: 2.5rem; margin-bottom: 15px; font-weight: 800;">Manage Schedules</h1>
-        <p style="color: rgba(255, 255, 255, 0.8); font-size: 1.1rem;">Add, edit, or remove movie showtimes and manage seat types</p>
+        <p style="color: rgba(255, 255, 255, 0.8); font-size: 1.1rem;">Add, edit, or remove movie showtimes</p>
     </div>
 
     <?php if ($error): ?>
@@ -308,126 +349,6 @@ $conn->close();
             <i class="fas fa-check-circle"></i> <?php echo $success; ?>
         </div>
     <?php endif; ?>
-
-    <?php if (isset($_GET['manage_seats']) && isset($current_schedule)): ?>
-    <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(52, 152, 219, 0.2);">
-        <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-chair"></i> Manage Seat Types for: <?php echo htmlspecialchars($current_schedule['movie_title_full']); ?>
-        </h2>
-        
-        <div style="background: rgba(23, 162, 184, 0.2); color: #17a2b8; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; font-weight: 600; border: 1px solid rgba(23, 162, 184, 0.3);">
-            <i class="fas fa-info-circle"></i> 
-            Show Time: <?php echo date('M d, Y', strtotime($current_schedule['show_date'])); ?> at <?php echo date('h:i A', strtotime($current_schedule['showtime'])); ?> | 
-            Total Seats in Database: <strong><?php echo count($seats); ?></strong>
-        </div>
-        
-        <div style="background: rgba(52, 152, 219, 0.1); border-radius: 10px; padding: 20px; margin-bottom: 30px;">
-            <h3 style="color: white; font-size: 1.2rem; margin-bottom: 15px; font-weight: 600;">Price Settings from Movie</h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
-                <div style="background: rgba(52, 152, 219, 0.2); padding: 15px; border-radius: 8px; text-align: center;">
-                    <div style="color: #3498db; font-size: 0.9rem; margin-bottom: 5px;">Standard Price</div>
-                    <div style="color: white; font-size: 1.3rem; font-weight: 700;">₱<?php echo number_format($current_schedule['standard_price'] ?? 350, 2); ?></div>
-                </div>
-                <div style="background: rgba(46, 204, 113, 0.2); padding: 15px; border-radius: 8px; text-align: center;">
-                    <div style="color: #2ecc71; font-size: 0.9rem; margin-bottom: 5px;">Premium Price</div>
-                    <div style="color: white; font-size: 1.3rem; font-weight: 700;">₱<?php echo number_format($current_schedule['premium_price'] ?? 450, 2); ?></div>
-                </div>
-                <div style="background: rgba(231, 76, 60, 0.2); padding: 15px; border-radius: 8px; text-align: center;">
-                    <div style="color: #e74c3c; font-size: 0.9rem; margin-bottom: 5px;">Sweet Spot Price</div>
-                    <div style="color: white; font-size: 1.3rem; font-weight: 700;">₱<?php echo number_format($current_schedule['sweet_spot_price'] ?? 550, 2); ?></div>
-                </div>
-            </div>
-        </div>
-        
-        <form method="POST" action="">
-            <input type="hidden" name="update_seat_types" value="1">
-            
-            <div style="display: flex; gap: 30px; flex-wrap: wrap; margin-bottom: 30px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 30px; height: 30px; background: #3498db; border-radius: 4px;"></div>
-                    <span style="color: white; font-weight: 600;">Standard (₱<?php echo number_format($current_schedule['standard_price'] ?? 350, 2); ?>)</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 30px; height: 30px; background: #2ecc71; border-radius: 4px;"></div>
-                    <span style="color: white; font-weight: 600;">Premium (₱<?php echo number_format($current_schedule['premium_price'] ?? 450, 2); ?>)</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 30px; height: 30px; background: #e74c3c; border-radius: 4px;"></div>
-                    <span style="color: white; font-weight: 600;">Sweet Spot (₱<?php echo number_format($current_schedule['sweet_spot_price'] ?? 550, 2); ?>)</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 30px; height: 30px; background: #95a5a6; border-radius: 4px;"></div>
-                    <span style="color: white; font-weight: 600;">Booked/Unavailable</span>
-                </div>
-            </div>
-            
-            <div style="background: rgba(0, 0, 0, 0.3); padding: 30px; border-radius: 10px; margin-bottom: 30px; overflow-x: auto;">
-                <div style="text-align: center; margin-bottom: 30px; color: white; font-size: 1.5rem; font-weight: 700;">
-                    <i class="fas fa-film"></i> SCREEN
-                </div>
-                
-                <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;">
-                    <?php 
-                    $current_row = '';
-                    $row_count = 0;
-                    foreach ($seats as $index => $seat): 
-                        $seat_number = $seat['seat_number'];
-                        $row_letter = substr($seat_number, 0, 1);
-                        
-                        if ($current_row != $row_letter) {
-                            if ($current_row != '') {
-                                echo '</div><div style="margin-bottom: 20px;"></div>';
-                            }
-                            $current_row = $row_letter;
-                            $row_count++;
-                            echo '<div style="width: 100%; margin-bottom: 15px;"><div style="color: #3498db; font-size: 1.2rem; font-weight: 700; margin-bottom: 10px;">Row ' . $row_letter . '</div><div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">';
-                        }
-                        
-                        $seat_color = '#3498db';
-                        if ($seat['seat_type'] === 'Premium') $seat_color = '#2ecc71';
-                        if ($seat['seat_type'] === 'Sweet Spot') $seat_color = '#e74c3c';
-                        if (!$seat['is_available']) $seat_color = '#95a5a6';
-                        
-                        $display_price = $seat['price'];
-                        if ($seat['seat_type'] === 'Premium') {
-                            $display_price = $current_schedule['premium_price'] ?? 450;
-                        } elseif ($seat['seat_type'] === 'Sweet Spot') {
-                            $display_price = $current_schedule['sweet_spot_price'] ?? 550;
-                        } else {
-                            $display_price = $current_schedule['standard_price'] ?? 350;
-                        }
-                    ?>
-                    <div style="text-align: center; min-width: 80px;">
-                        <div style="margin-bottom: 5px; color: white; font-size: 0.9rem; font-weight: 600;"><?php echo $seat['seat_number']; ?></div>
-                        <select name="seat_type[<?php echo $seat['id']; ?>]" style="width: 100%; padding: 8px; background: <?php echo $seat_color; ?>; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 6px; color: white; font-weight: 600; cursor: pointer; text-align: center;" <?php echo !$seat['is_available'] ? 'disabled' : ''; ?>>
-                            <option value="Standard" <?php echo $seat['seat_type'] === 'Standard' ? 'selected' : ''; ?> style="background: #2c3e50; color: white;">Standard</option>
-                            <option value="Premium" <?php echo $seat['seat_type'] === 'Premium' ? 'selected' : ''; ?> style="background: #2c3e50; color: white;">Premium</option>
-                            <option value="Sweet Spot" <?php echo $seat['seat_type'] === 'Sweet Spot' ? 'selected' : ''; ?> style="background: #2c3e50; color: white;">Sweet Spot</option>
-                        </select>
-                        <div style="margin-top: 5px; color: white; font-size: 0.75rem;">₱<?php echo number_format($display_price, 0); ?></div>
-                    </div>
-                    <?php 
-                        if (($index + 1) % 10 == 0 && $index + 1 < count($seats)) {
-                            echo '</div><div style="margin: 10px 0;"></div><div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">';
-                        }
-                    endforeach; 
-                    echo '</div>';
-                    ?>
-                </div>
-            </div>
-            
-            <div style="text-align: center; margin-top: 30px;">
-                <button type="submit" style="padding: 16px 45px; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; border: none; border-radius: 12px; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3); display: inline-flex; align-items: center; justify-content: center; gap: 10px;">
-                    <i class="fas fa-save"></i> Update Seat Types
-                </button>
-                <a href="index.php?page=admin/manage-schedules" style="padding: 16px 30px; background: rgba(255, 255, 255, 0.1); color: white; text-decoration: none; border-radius: 12px; font-size: 1.1rem; font-weight: 600; border: 2px solid rgba(52, 152, 219, 0.3); margin-left: 15px; display: inline-flex; align-items: center; justify-content: center; gap: 10px;">
-                    <i class="fas fa-arrow-left"></i> Back to Schedules
-                </a>
-            </div>
-        </form>
-    </div>
-    
-    <?php else: ?>
 
     <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(52, 152, 219, 0.2);">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
@@ -490,7 +411,7 @@ $conn->close();
                            value="<?php echo $edit_mode ? $edit_schedule['total_seats'] : (isset($_POST['total_seats']) ? $_POST['total_seats'] : '40'); ?>"
                            style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
                            min="1" max="100000" placeholder="Maximum seats">
-                    <div style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem; margin-top: 5px;">You can set up to 100,000 seats</div>
+                    <div style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem; margin-top: 5px;">Seats will be generated as A01-A10, B01-B10, C01-C10, etc.</div>
                 </div>
             </div>
             
@@ -635,7 +556,7 @@ $conn->close();
                                    style="padding: 8px 16px; background: rgba(52, 152, 219, 0.2); color: #3498db; text-decoration: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; border: 1px solid rgba(52, 152, 219, 0.3); display: inline-flex; align-items: center; gap: 5px;">
                                     <i class="fas fa-edit"></i> Edit
                                 </a>
-                                <a href="index.php?page=admin/manage-schedules&manage_seats=<?php echo $schedule['id']; ?>" 
+                                <a href="index.php?page=admin/manage-seats&schedule_id=<?php echo $schedule['id']; ?>" 
                                    style="padding: 8px 16px; background: rgba(155, 89, 182, 0.2); color: #9b59b6; text-decoration: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; border: 1px solid rgba(155, 89, 182, 0.3); display: inline-flex; align-items: center; gap: 5px;">
                                     <i class="fas fa-chair"></i> Seats
                                 </a>
@@ -653,8 +574,6 @@ $conn->close();
         </div>
         <?php endif; ?>
     </div>
-    
-    <?php endif; ?>
 </div>
 
 <style>
@@ -740,18 +659,6 @@ document.getElementById('showtime')?.addEventListener('focus', function() {
     if (!this.value) {
         this.value = '18:00';
     }
-});
-
-const seatSelects = document.querySelectorAll('select[name^="seat_type"]');
-seatSelects.forEach(select => {
-    select.addEventListener('change', function() {
-        const colorMap = {
-            'Standard': '#3498db',
-            'Premium': '#2ecc71',
-            'Sweet Spot': '#e74c3c'
-        };
-        this.style.background = colorMap[this.value] || '#3498db';
-    });
 });
 
 document.getElementById('movie_id')?.addEventListener('change', function() {

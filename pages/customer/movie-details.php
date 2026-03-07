@@ -97,6 +97,12 @@ require_once $root_dir . '/partials/header.php';
                         <i class="fas fa-tag" style="color: var(--primary-red); font-size: 1.2rem;"></i>
                         <span style="color: white; font-weight: 600;"><?php echo htmlspecialchars($movie['genre']); ?></span>
                     </div>
+                    <?php if (!empty($movie['director'])): ?>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <i class="fas fa-user" style="color: var(--primary-red); font-size: 1.2rem;"></i>
+                        <span style="color: white; font-weight: 600;">Director: <?php echo htmlspecialchars($movie['director']); ?></span>
+                    </div>
+                    <?php endif; ?>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <i class="fas fa-calendar" style="color: var(--primary-red); font-size: 1.2rem;"></i>
                         <span style="color: white; font-weight: 600;">Added: <?php echo date('M d, Y', strtotime($movie['created_at'])); ?></span>
@@ -154,14 +160,14 @@ require_once $root_dir . '/partials/header.php';
     </div>
     <?php endif; ?>
 
-    <!-- Venue Information Section -->
+    <!-- Venue Information Section with Embedded Map -->
     <?php if (!empty($movie['venue_name']) || !empty($movie['venue_location']) || !empty($movie['google_maps_link'])): ?>
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 20px; padding: 30px; border: 1px solid rgba(226, 48, 32, 0.3); margin-bottom: 40px;">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
             <i class="fas fa-map-marker-alt" style="color: #e74c3c;"></i> Venue Information
         </h2>
         
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
             <div>
                 <?php if (!empty($movie['venue_name'])): ?>
                 <div style="margin-bottom: 20px;">
@@ -187,18 +193,32 @@ require_once $root_dir . '/partials/header.php';
             </div>
             
             <?php if (!empty($movie['google_maps_link'])): 
-                $coordinates = '';
+                // Extract coordinates from Google Maps link
+                $embed_url = '';
                 if (preg_match('/q=([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
-                    $coordinates = $matches[1] . ', ' . $matches[2];
+                    $lat = $matches[1];
+                    $lng = $matches[2];
+                    $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
+                } elseif (preg_match('/@([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
+                    $lat = $matches[1];
+                    $lng = $matches[2];
+                    $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
+                } else {
+                    $embed_url = "https://maps.google.com/maps?q=" . urlencode($movie['venue_location'] ?? $movie['venue_name'] ?? '') . "&z=15&output=embed";
                 }
             ?>
             <div style="background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;">
-                <div style="color: white; font-weight: 600; margin-bottom: 15px;">📍 Coordinates</div>
-                <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; font-family: monospace; font-size: 1.1rem; color: #f1c40f;">
-                    <?php echo $coordinates ?: '10.273055307646723, 123.7611768131498'; ?>
+                <div style="color: white; font-weight: 600; margin-bottom: 15px;">📍 Location Map</div>
+                <div style="position: relative; padding-bottom: 75%; height: 0; overflow: hidden; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3);">
+                    <iframe 
+                        style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" 
+                        src="<?php echo $embed_url; ?>" 
+                        allowfullscreen="" 
+                        loading="lazy">
+                    </iframe>
                 </div>
-                <div style="color: var(--pale-red); font-size: 0.85rem; margin-top: 10px;">
-                    <i class="fas fa-info-circle"></i> Click the map button above to view exact location
+                <div style="color: var(--pale-red); font-size: 0.85rem; margin-top: 10px; text-align: center;">
+                    <i class="fas fa-info-circle"></i> Exact location shown on map
                 </div>
             </div>
             <?php endif; ?>
@@ -370,6 +390,10 @@ require_once $root_dir . '/partials/header.php';
 
 @media (max-width: 992px) {
     .movie-details-container > div:first-of-type {
+        grid-template-columns: 1fr;
+    }
+    
+    .venue-section > div {
         grid-template-columns: 1fr;
     }
 }

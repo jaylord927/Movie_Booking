@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS movies (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
+    director VARCHAR(255),
     genre VARCHAR(100),
     duration VARCHAR(20),
     rating VARCHAR(10),
@@ -33,7 +34,9 @@ CREATE TABLE IF NOT EXISTS movies (
     added_by INT NULL,
     updated_by INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_updated TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+    last_updated TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (added_by) REFERENCES users(u_id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_by) REFERENCES users(u_id) ON DELETE SET NULL
 );
 
 -- Movie schedules table
