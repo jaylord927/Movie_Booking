@@ -17,12 +17,92 @@ $success = '';
 $selected_seats = [];
 $pending_booking = null;
 
-// Check for pending booking
+$auto_cancel_stmt = $conn->prepare("
+    SELECT b.b_id, b.movie_name, b.show_date, b.showtime, b.seat_no, b.booking_fee, b.booking_reference,
+           ms.id as schedule_id
+    FROM tbl_booking b
+    JOIN movie_schedules ms ON b.movie_name = ms.movie_title 
+        AND b.show_date = ms.show_date 
+        AND b.showtime = ms.showtime
+    WHERE b.u_id = ? AND b.payment_status = 'Pending' AND b.status = 'Ongoing'
+    AND TIMESTAMPDIFF(HOUR, b.booking_date, NOW()) >= 3
+");
+$auto_cancel_stmt->bind_param("i", $user_id);
+$auto_cancel_stmt->execute();
+$auto_cancel_result = $auto_cancel_stmt->get_result();
+
+if ($auto_cancel_result->num_rows > 0) {
+    $conn->begin_transaction();
+    
+    try {
+        while ($expired_booking = $auto_cancel_result->fetch_assoc()) {
+            $booking_id = $expired_booking['b_id'];
+            $schedule_id = $expired_booking['schedule_id'];
+            $seat_numbers = $expired_booking['seat_no'];
+            $movie_title = $expired_booking['movie_name'];
+            $show_date = $expired_booking['show_date'];
+            $showtime = $expired_booking['showtime'];
+            
+            $update_booking = $conn->prepare("
+                UPDATE tbl_booking 
+                SET status = 'Cancelled', payment_status = 'Refunded' 
+                WHERE b_id = ?
+            ");
+            $update_booking->bind_param("i", $booking_id);
+            
+            if (!$update_booking->execute()) {
+                throw new Exception("Failed to cancel expired booking!");
+            }
+            $update_booking->close();
+            
+            $seats = explode(', ', $seat_numbers);
+            
+            foreach ($seats as $seat_number) {
+                $seat_update = $conn->prepare("
+                    UPDATE seat_availability 
+                    SET is_available = 1, booking_id = NULL
+                    WHERE schedule_id = ? 
+                    AND seat_number = ?
+                ");
+                $seat_update->bind_param("is", $schedule_id, $seat_number);
+                
+                if (!$seat_update->execute()) {
+                    throw new Exception("Failed to update seat availability for expired booking!");
+                }
+                $seat_update->close();
+            }
+            
+            $seat_count = count($seats);
+            $update_schedule = $conn->prepare("
+                UPDATE movie_schedules 
+                SET available_seats = available_seats + ?
+                WHERE id = ?
+            ");
+            $update_schedule->bind_param("ii", $seat_count, $schedule_id);
+            
+            if (!$update_schedule->execute()) {
+                throw new Exception("Failed to update schedule for expired booking!");
+            }
+            $update_schedule->close();
+        }
+        
+        $conn->commit();
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+    }
+}
+$auto_cancel_stmt->close();
+
 $pending_stmt = $conn->prepare("
-    SELECT * FROM tbl_booking 
-    WHERE u_id = ? AND payment_status = 'Pending' AND status = 'Ongoing'
-    AND TIMESTAMPDIFF(HOUR, booking_date, NOW()) < 3
-    ORDER BY booking_date DESC LIMIT 1
+    SELECT b.*, ms.id as schedule_id
+    FROM tbl_booking b
+    LEFT JOIN movie_schedules ms ON b.movie_name = ms.movie_title 
+        AND b.show_date = ms.show_date 
+        AND b.showtime = ms.showtime
+    WHERE b.u_id = ? AND b.payment_status = 'Pending' AND b.status = 'Ongoing'
+    AND TIMESTAMPDIFF(HOUR, b.booking_date, NOW()) < 3
+    ORDER BY b.booking_date DESC LIMIT 1
 ");
 $pending_stmt->bind_param("i", $user_id);
 $pending_stmt->execute();
@@ -311,7 +391,7 @@ require_once $root_dir . '/partials/header.php';
             </div>
         </div>
         <div style="display: flex; gap: 15px;">
-            <a href="#" class="btn btn-primary" style="padding: 12px 25px;">
+            <a href="<?php echo SITE_URL; ?>index.php?page=customer/payment&booking_id=<?php echo $pending_booking['b_id']; ?>" class="btn btn-primary" style="padding: 12px 25px;">
                 <i class="fas fa-credit-card"></i> Pay Now (₱<?php echo number_format($pending_booking['booking_fee'], 2); ?>)
             </a>
             <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" class="btn btn-secondary" style="padding: 12px 25px;">
@@ -378,7 +458,7 @@ require_once $root_dir . '/partials/header.php';
                 <div><?php echo $success; ?></div>
             </div>
             <div style="display: flex; gap: 10px;">
-                <a href="#" class="btn btn-primary" style="padding: 10px 20px;">
+                <a href="<?php echo SITE_URL; ?>index.php?page=customer/payment&booking_id=<?php echo $pending_booking['b_id']; ?>" class="btn btn-primary" style="padding: 10px 20px;">
                     <i class="fas fa-credit-card"></i> Payment
                 </a>
                 <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" class="btn btn-secondary" style="padding: 10px 20px;">

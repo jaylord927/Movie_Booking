@@ -1,7 +1,4 @@
 <?php
-// includes/functions.php
-
-// Check if config is loaded
 if (!defined('SITE_URL')) {
     require_once __DIR__ . '/config.php';
 }
@@ -30,9 +27,9 @@ function is_admin() {
 }
 
 function get_db_connection() {
-    global $conn;
+    static $conn = null;
     
-    if (!isset($conn) || !$conn->ping()) {
+    if ($conn === null || !$conn->ping()) {
         $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
         
         if ($conn->connect_error) {

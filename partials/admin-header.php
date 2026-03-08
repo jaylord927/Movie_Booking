@@ -1,20 +1,15 @@
 <?php
-// partials/admin-header.php
-
-// Start session if not started
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-// Check if admin is logged in
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'Admin') {
     header("Location: " . SITE_URL . "index.php?page=login");
     exit();
 }
 
-// Define SITE_URL if not defined
 if (!defined('SITE_URL')) {
-    define('SITE_URL', 'http://localhost/Movie/');
+    define('SITE_URL', 'http://localhost/Movie_Booking/');
 }
 ?>
 <!DOCTYPE html>
@@ -126,6 +121,16 @@ if (!defined('SITE_URL')) {
             background: linear-gradient(135deg, var(--admin-accent) 0%, #2980b9 100%);
             box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
         }
+
+        .payment-badge {
+            background: var(--admin-warning);
+            color: #333;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 5px;
+        }
         
         .admin-user-info {
             display: flex;
@@ -199,7 +204,6 @@ if (!defined('SITE_URL')) {
             transform: translateY(-2px);
         }
         
-        /* Responsive Design */
         @media (max-width: 992px) {
             .admin-header-container {
                 flex-direction: column;
@@ -242,9 +246,18 @@ if (!defined('SITE_URL')) {
             
             <nav class="admin-nav">
                 <?php
-                // Determine current page for active state
                 $current_page = isset($_GET['page']) ? $_GET['page'] : 'admin/dashboard';
                 $admin_section = explode('/', $current_page)[1] ?? 'dashboard';
+                
+                $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+                $pending_count = 0;
+                if (!$conn->connect_error) {
+                    $result = $conn->query("SELECT COUNT(*) as count FROM manual_payments WHERE status = 'Pending'");
+                    if ($result) {
+                        $pending_count = $result->fetch_assoc()['count'];
+                    }
+                    $conn->close();
+                }
                 ?>
                 
                 <a href="<?php echo SITE_URL; ?>index.php?page=admin/dashboard" 
@@ -265,6 +278,14 @@ if (!defined('SITE_URL')) {
                 <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-users" 
                    class="admin-nav-link <?php echo $admin_section == 'manage-users' ? 'active' : ''; ?>">
                     <i class="fas fa-users"></i> Users
+                </a>
+
+                <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-payments" 
+                   class="admin-nav-link <?php echo $admin_section == 'manage-payments' ? 'active' : ''; ?>">
+                    <i class="fas fa-credit-card"></i> Payments
+                    <?php if ($pending_count > 0): ?>
+                    <span class="payment-badge"><?php echo $pending_count; ?></span>
+                    <?php endif; ?>
                 </a>
                 
                 <a href="<?php echo SITE_URL; ?>" 

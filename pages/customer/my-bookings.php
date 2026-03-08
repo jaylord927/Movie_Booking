@@ -18,22 +18,93 @@ $error = '';
 $success = '';
 
 $auto_cancel_stmt = $conn->prepare("
-    UPDATE tbl_booking 
-    SET status = 'Cancelled', payment_status = 'Refunded' 
-    WHERE u_id = ? AND payment_status = 'Pending' AND status = 'Ongoing'
-    AND TIMESTAMPDIFF(HOUR, booking_date, NOW()) >= 3
+    SELECT b.b_id, b.movie_name, b.show_date, b.showtime, b.seat_no, b.booking_fee, b.booking_reference,
+           ms.id as schedule_id
+    FROM tbl_booking b
+    JOIN movie_schedules ms ON b.movie_name = ms.movie_title 
+        AND b.show_date = ms.show_date 
+        AND b.showtime = ms.showtime
+    WHERE b.u_id = ? AND b.payment_status = 'Pending' AND b.status = 'Ongoing'
+    AND TIMESTAMPDIFF(HOUR, b.booking_date, NOW()) >= 3
 ");
 $auto_cancel_stmt->bind_param("i", $user_id);
 $auto_cancel_stmt->execute();
+$auto_cancel_result = $auto_cancel_stmt->get_result();
+
+if ($auto_cancel_result->num_rows > 0) {
+    $conn->begin_transaction();
+    
+    try {
+        while ($expired_booking = $auto_cancel_result->fetch_assoc()) {
+            $booking_id = $expired_booking['b_id'];
+            $schedule_id = $expired_booking['schedule_id'];
+            $seat_numbers = $expired_booking['seat_no'];
+            $movie_title = $expired_booking['movie_name'];
+            $show_date = $expired_booking['show_date'];
+            $showtime = $expired_booking['showtime'];
+            
+            $update_booking = $conn->prepare("
+                UPDATE tbl_booking 
+                SET status = 'Cancelled', payment_status = 'Refunded' 
+                WHERE b_id = ?
+            ");
+            $update_booking->bind_param("i", $booking_id);
+            
+            if (!$update_booking->execute()) {
+                throw new Exception("Failed to cancel expired booking!");
+            }
+            $update_booking->close();
+            
+            $seats = explode(', ', $seat_numbers);
+            
+            foreach ($seats as $seat_number) {
+                $seat_update = $conn->prepare("
+                    UPDATE seat_availability 
+                    SET is_available = 1, booking_id = NULL
+                    WHERE schedule_id = ? 
+                    AND seat_number = ?
+                ");
+                $seat_update->bind_param("is", $schedule_id, $seat_number);
+                
+                if (!$seat_update->execute()) {
+                    throw new Exception("Failed to update seat availability for expired booking!");
+                }
+                $seat_update->close();
+            }
+            
+            $seat_count = count($seats);
+            $update_schedule = $conn->prepare("
+                UPDATE movie_schedules 
+                SET available_seats = available_seats + ?
+                WHERE id = ?
+            ");
+            $update_schedule->bind_param("ii", $seat_count, $schedule_id);
+            
+            if (!$update_schedule->execute()) {
+                throw new Exception("Failed to update schedule for expired booking!");
+            }
+            $update_schedule->close();
+        }
+        
+        $conn->commit();
+        $success = "Expired bookings have been automatically cancelled and seats released.";
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        $error = "Error processing auto-cancel: " . $e->getMessage();
+    }
+}
 $auto_cancel_stmt->close();
 
 if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
     $booking_id = intval($_GET['cancel']);
     
     $check_stmt = $conn->prepare("
-        SELECT b.*, m.title as movie_title 
+        SELECT b.*, ms.id as schedule_id
         FROM tbl_booking b
-        LEFT JOIN movies m ON b.movie_name = m.title
+        JOIN movie_schedules ms ON b.movie_name = ms.movie_title 
+            AND b.show_date = ms.show_date 
+            AND b.showtime = ms.showtime
         WHERE b.b_id = ? AND b.u_id = ? AND b.status = 'Ongoing'
     ");
     $check_stmt->bind_param("ii", $booking_id, $user_id);
@@ -44,7 +115,7 @@ if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
         $error = "Booking not found or cannot be cancelled!";
     } else {
         $booking = $check_result->fetch_assoc();
-        $movie_title = $booking['movie_name'];
+        $schedule_id = $booking['schedule_id'];
         $seat_numbers = $booking['seat_no'];
         
         $conn->begin_transaction();
@@ -66,21 +137,12 @@ if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
             
             foreach ($seats as $seat_number) {
                 $seat_update = $conn->prepare("
-                    UPDATE seat_availability sa
-                    JOIN movie_schedules ms ON sa.schedule_id = ms.id
-                    SET sa.is_available = 1, sa.booking_id = NULL
-                    WHERE sa.movie_title = ? 
-                    AND sa.show_date = ? 
-                    AND sa.showtime = ? 
-                    AND sa.seat_number = ?
+                    UPDATE seat_availability 
+                    SET is_available = 1, booking_id = NULL
+                    WHERE schedule_id = ? 
+                    AND seat_number = ?
                 ");
-                $seat_update->bind_param(
-                    "ssss",
-                    $movie_title,
-                    $booking['show_date'],
-                    $booking['showtime'],
-                    $seat_number
-                );
+                $seat_update->bind_param("is", $schedule_id, $seat_number);
                 
                 if (!$seat_update->execute()) {
                     throw new Exception("Failed to update seat availability!");
@@ -88,21 +150,13 @@ if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
                 $seat_update->close();
             }
             
+            $seat_count = count($seats);
             $update_schedule = $conn->prepare("
                 UPDATE movie_schedules 
                 SET available_seats = available_seats + ?
-                WHERE movie_title = ? 
-                AND show_date = ? 
-                AND showtime = ?
+                WHERE id = ?
             ");
-            $seat_count = count($seats);
-            $update_schedule->bind_param(
-                "isss",
-                $seat_count,
-                $movie_title,
-                $booking['show_date'],
-                $booking['showtime']
-            );
+            $update_schedule->bind_param("ii", $seat_count, $schedule_id);
             
             if (!$update_schedule->execute()) {
                 throw new Exception("Failed to update schedule!");
@@ -111,7 +165,7 @@ if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
             
             $conn->commit();
             
-            $success = "Booking cancelled successfully! Refund has been processed.";
+            $success = "Booking cancelled successfully! Your seats have been released.";
             
         } catch (Exception $e) {
             $conn->rollback();
@@ -156,6 +210,9 @@ $bookings_stmt = $conn->prepare("
         m.genre,
         m.duration,
         m.rating,
+        m.standard_price,
+        m.premium_price,
+        m.sweet_spot_price,
         TIMESTAMPDIFF(HOUR, NOW(), CONCAT(b.show_date, ' ', b.showtime)) as hours_until_show,
         TIMESTAMPDIFF(HOUR, b.booking_date, NOW()) as hours_since_booking,
         CASE 
@@ -170,10 +227,11 @@ $bookings_stmt = $conn->prepare("
     WHERE b.u_id = ?
     ORDER BY 
         CASE 
-            WHEN b.status = 'Ongoing' THEN 1
-            WHEN b.status = 'Done' THEN 2
-            WHEN b.status = 'Cancelled' THEN 3
-            ELSE 4
+            WHEN b.status = 'Ongoing' AND b.payment_status = 'Pending' THEN 1
+            WHEN b.status = 'Ongoing' THEN 2
+            WHEN b.status = 'Done' THEN 3
+            WHEN b.status = 'Cancelled' THEN 4
+            ELSE 5
         END,
         b.show_date DESC,
         b.showtime DESC
@@ -348,6 +406,7 @@ require_once $root_dir . '/partials/header.php';
                 $is_expired = $booking['booking_status'] == 'expired';
                 $is_upcoming = $booking['booking_status'] == 'upcoming';
                 $is_paid = $booking['payment_status'] == 'Paid';
+                $is_pending = $booking['payment_status'] == 'Pending' && $booking['status'] == 'Ongoing';
                 
                 $border_color = $is_cancelled ? '#e74c3c' : '#2ecc71';
                 
@@ -400,13 +459,27 @@ require_once $root_dir . '/partials/header.php';
                 $hours_since_booking = $booking['hours_since_booking'];
                 $payment_hours_left = 3 - $hours_since_booking;
                 $payment_time_remaining = '';
-                if (!$is_paid && !$is_cancelled && !$is_completed && !$is_expired && $payment_hours_left > 0) {
+                if ($is_pending && $payment_hours_left > 0) {
                     if ($payment_hours_left >= 1) {
                         $payment_time_remaining = floor($payment_hours_left) . ' hour' . (floor($payment_hours_left) > 1 ? 's' : '') . ' left to pay';
                     } else {
                         $minutes_left = round($payment_hours_left * 60);
                         $payment_time_remaining = $minutes_left . ' minute' . ($minutes_left > 1 ? 's' : '') . ' left to pay';
                     }
+                }
+                
+                $seat_types = [];
+                $seats = explode(', ', $booking['seat_no']);
+                $total_price_per_seat = $booking['booking_fee'] / count($seats);
+                
+                if (abs($total_price_per_seat - ($booking['standard_price'] ?? 350)) < 0.01) {
+                    $seat_type_for_rebook = 'Standard';
+                } elseif (abs($total_price_per_seat - ($booking['premium_price'] ?? 450)) < 0.01) {
+                    $seat_type_for_rebook = 'Premium';
+                } elseif (abs($total_price_per_seat - ($booking['sweet_spot_price'] ?? 550)) < 0.01) {
+                    $seat_type_for_rebook = 'Sweet Spot';
+                } else {
+                    $seat_type_for_rebook = 'Standard';
                 }
             ?>
             <div style="background: rgba(255, 255, 255, 0.05); border-radius: 12px; overflow: hidden;
@@ -529,16 +602,24 @@ require_once $root_dir . '/partials/header.php';
                                     <i class="fas fa-print"></i> Print Receipt
                                 </a>
                                 
-                                <?php if (!$is_paid && !$is_cancelled && !$is_completed && !$is_expired): ?>
-                                <a href="?page=customer/my-bookings&pay=<?php echo $booking['b_id']; ?>" 
-                                   class="btn btn-primary" style="padding: 10px 20px;"
-                                   onclick="return confirm('Proceed to payment for this booking?')">
+                                <?php if ($is_pending): ?>
+                                <a href="<?php echo SITE_URL; ?>index.php?page=customer/payment&booking_id=<?php echo $booking['b_id']; ?>" 
+                                   class="btn btn-primary" style="padding: 10px 20px;">
                                     <i class="fas fa-credit-card"></i> Pay Now
                                 </a>
                                 <?php endif; ?>
                                 
+                                <?php if ($is_paid && $booking['movie_id']): ?>
+                                <a href="<?php echo SITE_URL; ?>index.php?page=customer/rebook&booking_id=<?php echo $booking['b_id']; ?>&seat_type=<?php echo $seat_type_for_rebook; ?>" 
+                                   class="btn btn-success" style="padding: 10px 20px; background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%); color: white; box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3); text-decoration: none; display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: 10px; font-weight: 600; transition: all 0.3s ease; cursor: pointer; font-size: 1rem;"
+                                   onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 25px rgba(46, 204, 113, 0.4)';"
+                                   onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(46, 204, 113, 0.3)';">
+                                    <i class="fas fa-redo-alt"></i> Rebook
+                                </a>
+                                <?php endif; ?>
+                                
                                 <?php if ($booking['movie_id']): ?>
-                                    <?php if ($is_cancelled): ?>
+                                    <?php if ($is_cancelled || $is_expired): ?>
                                     <a href="<?php echo SITE_URL; ?>index.php?page=customer/booking&movie=<?php echo $booking['movie_id']; ?>" 
                                        class="btn btn-primary" style="padding: 10px 20px;">
                                         <i class="fas fa-redo-alt"></i> Book Again
@@ -551,10 +632,10 @@ require_once $root_dir . '/partials/header.php';
                                     <?php endif; ?>
                                 <?php endif; ?>
                                 
-                                <?php if (!$is_cancelled && !$is_completed && !$is_expired && $booking['hours_until_show'] > 2): ?>
+                                <?php if ($is_pending && $booking['hours_until_show'] > 2): ?>
                                 <a href="?page=customer/my-bookings&cancel=<?php echo $booking['b_id']; ?>" 
                                    class="btn btn-danger" style="padding: 10px 20px;"
-                                   onclick="return confirm('Are you sure you want to cancel this booking?\n\nMovie: <?php echo addslashes($booking['movie_name']); ?>\nShow: <?php echo $show_date; ?> <?php echo $show_time; ?>\nSeats: <?php echo addslashes($booking['seat_no']); ?>\n\nA refund will be processed.')">
+                                   onclick="return confirm('Are you sure you want to cancel this booking?\n\nMovie: <?php echo addslashes($booking['movie_name']); ?>\nShow: <?php echo $show_date; ?> <?php echo $show_time; ?>\nSeats: <?php echo addslashes($booking['seat_no']); ?>\n\nYour seats will be released.')">
                                     <i class="fas fa-times"></i> Cancel
                                 </a>
                                 <?php endif; ?>
@@ -654,6 +735,18 @@ require_once $root_dir . '/partials/header.php';
     background: linear-gradient(135deg, var(--dark-red) 0%, var(--deep-red) 100%);
     transform: translateY(-3px);
     box-shadow: 0 8px 25px rgba(226, 48, 32, 0.4);
+}
+
+.btn-success {
+    background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+    color: white;
+    box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3);
+}
+
+.btn-success:hover {
+    background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(46, 204, 113, 0.4);
 }
 
 .btn-secondary {

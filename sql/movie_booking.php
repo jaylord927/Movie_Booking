@@ -122,3 +122,57 @@ CREATE TABLE IF NOT EXISTS suggestions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS payment_methods (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    method_name VARCHAR(50) NOT NULL,
+    account_name VARCHAR(100) NOT NULL,
+    account_number VARCHAR(50) NOT NULL,
+    qr_code_path VARCHAR(255),
+    instructions TEXT,
+    is_active BOOLEAN DEFAULT 1,
+    display_order INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Manual Payments Table
+CREATE TABLE IF NOT EXISTS manual_payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    booking_id INT NOT NULL,
+    user_id INT NOT NULL,
+    payment_method_id INT NOT NULL,
+    reference_number VARCHAR(100) NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    screenshot_path VARCHAR(255) NOT NULL,
+    status ENUM('Pending', 'Verified', 'Rejected') DEFAULT 'Pending',
+    admin_notes TEXT,
+    verified_by INT NULL,
+    verified_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE CASCADE,
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE CASCADE,
+    FOREIGN KEY (verified_by) REFERENCES users(u_id) ON DELETE SET NULL
+);
+
+-- PayMongo Payments Table 
+CREATE TABLE IF NOT EXISTS paymongo_payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    booking_id INT NOT NULL,
+    user_id INT NOT NULL,
+    paymongo_payment_id VARCHAR(100),
+    amount DECIMAL(10,2) NOT NULL,
+    payment_method VARCHAR(50),
+    status ENUM('Pending', 'Paid', 'Failed') DEFAULT 'Pending',
+    payment_intent_id VARCHAR(100),
+    payment_method_id VARCHAR(100),
+    client_key VARCHAR(255),
+    redirect_url VARCHAR(255),
+    webhook_received BOOLEAN DEFAULT 0,
+    response_data JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE CASCADE
+);
