@@ -1,0 +1,20 @@
+# Environment variables
+.env
+
+# Logs
+*.log
+
+# Vendor directories (if you use Composer)
+/vendor/
+/node_modules/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
