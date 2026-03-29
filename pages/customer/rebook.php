@@ -22,7 +22,6 @@ if ($booking_id <= 0) {
     exit();
 }
 
-// Get original booking details with seat information
 $booking_stmt = $conn->prepare("
     SELECT 
         b.*,
@@ -62,44 +61,28 @@ if ($booking_result->num_rows === 0) {
 $booking = $booking_result->fetch_assoc();
 $booking_stmt->close();
 
-// Get original seat types and counts
 $original_seats_query = $conn->prepare("
-    SELECT seat_type, COUNT(*) as count
+    SELECT seat_number, seat_type, price
     FROM booked_seats
     WHERE booking_id = ?
-    GROUP BY seat_type
 ");
 $original_seats_query->bind_param("i", $booking_id);
 $original_seats_query->execute();
 $original_seats_result = $original_seats_query->get_result();
 $original_seat_counts = [];
+$original_seat_details = [];
 $current_seats_array = [];
 
 while ($row = $original_seats_result->fetch_assoc()) {
-    $original_seat_counts[$row['seat_type']] = $row['count'];
-}
-$original_seats_query->close();
-
-// Get all seat numbers for display
-$seats_list_query = $conn->prepare("
-    SELECT seat_number
-    FROM booked_seats
-    WHERE booking_id = ?
-    ORDER BY seat_number
-");
-$seats_list_query->bind_param("i", $booking_id);
-$seats_list_query->execute();
-$seats_list_result = $seats_list_query->get_result();
-$current_seats_array = [];
-while ($row = $seats_list_result->fetch_assoc()) {
+    $original_seat_counts[$row['seat_type']] = ($original_seat_counts[$row['seat_type']] ?? 0) + 1;
+    $original_seat_details[] = $row;
     $current_seats_array[] = $row['seat_number'];
 }
-$seats_list_query->close();
+$original_seats_query->close();
 
 $current_seats = implode(', ', $current_seats_array);
 $total_original_seats = count($current_seats_array);
 
-// Get available schedules
 $schedules_stmt = $conn->prepare("
     SELECT s.*, m.standard_price, m.premium_price, m.sweet_spot_price
     FROM movie_schedules s
@@ -142,13 +125,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
             $schedule = $schedule_result->fetch_assoc();
             $schedule_stmt->close();
             
-            // Count selected seats by type
             $selected_seat_counts = [];
             $seat_check_failed = false;
             $unavailable_seats = [];
-            $seat_details = [];
+            $new_seat_details = [];
             
-            // First, get the seat types for selected seats
             foreach ($selected_seats as $seat_number) {
                 $seat_check = $conn->prepare("
                     SELECT is_available, price, seat_type 
@@ -162,20 +143,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
                 $seat_result = $seat_check->get_result();
                 
                 if ($seat_result->num_rows === 0) {
-                    $seat_check_failed = true;
-                    $unavailable_seats[] = $seat_number;
+                    if (!in_array($seat_number, $current_seats_array)) {
+                        $seat_check_failed = true;
+                        $unavailable_seats[] = $seat_number;
+                    } else {
+                        $seat_data = [
+                            'number' => $seat_number,
+                            'type' => $this_seat_type ?? 'Standard',
+                            'price' => 0
+                        ];
+                        foreach ($original_seat_details as $orig) {
+                            if ($orig['seat_number'] == $seat_number) {
+                                $seat_data['type'] = $orig['seat_type'];
+                                $seat_data['price'] = $orig['price'];
+                                break;
+                            }
+                        }
+                        $new_seat_details[] = $seat_data;
+                        $selected_seat_counts[$seat_data['type']] = ($selected_seat_counts[$seat_data['type']] ?? 0) + 1;
+                    }
                 } else {
                     $seat_data = $seat_result->fetch_assoc();
-                    $seat_details[] = [
+                    $new_seat_details[] = [
                         'number' => $seat_number,
                         'type' => $seat_data['seat_type'],
                         'price' => $seat_data['price']
                     ];
-                    
-                    if (!isset($selected_seat_counts[$seat_data['seat_type']])) {
-                        $selected_seat_counts[$seat_data['seat_type']] = 0;
-                    }
-                    $selected_seat_counts[$seat_data['seat_type']]++;
+                    $selected_seat_counts[$seat_data['seat_type']] = ($selected_seat_counts[$seat_data['seat_type']] ?? 0) + 1;
                 }
                 $seat_check->close();
             }
@@ -183,19 +177,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
             if ($seat_check_failed) {
                 $error = "Seats " . implode(", ", $unavailable_seats) . " are not available!";
             } else {
-                // Validate seat counts match original booking
                 $count_mismatch = false;
                 $mismatch_message = [];
                 
                 foreach ($original_seat_counts as $type => $count) {
-                    $selected_count = isset($selected_seat_counts[$type]) ? $selected_seat_counts[$type] : 0;
+                    $selected_count = $selected_seat_counts[$type] ?? 0;
                     if ($selected_count != $count) {
                         $count_mismatch = true;
                         $mismatch_message[] = "$type: need $count, selected $selected_count";
                     }
                 }
                 
-                // Check if any extra seat types were selected
                 foreach ($selected_seat_counts as $type => $count) {
                     if (!isset($original_seat_counts[$type])) {
                         $count_mismatch = true;
@@ -212,7 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
                     
                     try {
                         $total_fee = 0;
-                        foreach ($seat_details as $seat) {
+                        foreach ($new_seat_details as $seat) {
                             $total_fee += $seat['price'];
                         }
                         
@@ -220,8 +212,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
                             throw new Exception("Total price must match your original payment of ₱" . number_format($booking['booking_fee'], 2));
                         }
                         
+                        $seats_to_remove = array_diff($current_seats_array, $selected_seats);
+                        $seats_to_add = array_diff($selected_seats, $current_seats_array);
+                        
                         if ($schedule_id != $booking['current_schedule_id']) {
-                            // Release old seats from old schedule
                             foreach ($current_seats_array as $seat_number) {
                                 $seat_update = $conn->prepare("
                                     UPDATE seat_availability 
@@ -230,9 +224,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
                                     AND seat_number = ?
                                 ");
                                 $seat_update->bind_param("is", $booking['current_schedule_id'], $seat_number);
-                                
                                 if (!$seat_update->execute()) {
-                                    throw new Exception("Failed to release old seats!");
+                                    throw new Exception("Failed to release old seats from old schedule!");
                                 }
                                 $seat_update->close();
                             }
@@ -244,7 +237,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
                                 WHERE id = ?
                             ");
                             $update_old_schedule->bind_param("ii", $old_seat_count, $booking['current_schedule_id']);
-                            
                             if (!$update_old_schedule->execute()) {
                                 throw new Exception("Failed to update old schedule!");
                             }
@@ -256,90 +248,97 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
                                 WHERE b_id = ?
                             ");
                             $update_booking->bind_param("ssi", $schedule['show_date'], $schedule['showtime'], $booking_id);
-                            
                             if (!$update_booking->execute()) {
                                 throw new Exception("Failed to update booking showtime!");
                             }
                             $update_booking->close();
                         }
                         
-                        // Release current seats from booked_seats
-                        $delete_old_seats = $conn->prepare("
-                            DELETE FROM booked_seats 
-                            WHERE booking_id = ?
-                        ");
-                        $delete_old_seats->bind_param("i", $booking_id);
-                        
-                        if (!$delete_old_seats->execute()) {
-                            throw new Exception("Failed to update booked seats record");
-                        }
-                        $delete_old_seats->close();
-                        
-                        // Insert new seats into booked_seats
-                        $insert_new_seats = $conn->prepare("
-                            INSERT INTO booked_seats (booking_id, seat_number, seat_type, price)
-                            VALUES (?, ?, ?, ?)
-                        ");
-                        
-                        foreach ($seat_details as $seat) {
-                            $insert_new_seats->bind_param("issd", $booking_id, $seat['number'], $seat['type'], $seat['price']);
-                            
-                            if (!$insert_new_seats->execute()) {
-                                throw new Exception("Failed to insert booked seat: " . $seat['number']);
+                        foreach ($seats_to_remove as $seat_number) {
+                            $seat_update = $conn->prepare("
+                                UPDATE seat_availability 
+                                SET is_available = 1, booking_id = NULL
+                                WHERE schedule_id = ? 
+                                AND seat_number = ?
+                            ");
+                            $seat_update->bind_param("is", $schedule_id, $seat_number);
+                            if (!$seat_update->execute()) {
+                                throw new Exception("Failed to release seat: $seat_number");
                             }
+                            $seat_update->close();
                         }
-                        $insert_new_seats->close();
                         
-                        // Update seat availability for new seats
-                        foreach ($seat_details as $seat) {
+                        foreach ($seats_to_add as $seat_number) {
                             $seat_update = $conn->prepare("
                                 UPDATE seat_availability 
                                 SET is_available = 0, booking_id = ?
                                 WHERE schedule_id = ? 
                                 AND seat_number = ?
                             ");
-                            $seat_update->bind_param("iis", $booking_id, $schedule_id, $seat['number']);
-                            
+                            $seat_update->bind_param("iis", $booking_id, $schedule_id, $seat_number);
                             if (!$seat_update->execute()) {
-                                throw new Exception("Failed to update seat availability for new seat: " . $seat['number']);
+                                throw new Exception("Failed to book new seat: $seat_number");
                             }
                             $seat_update->close();
                         }
                         
-                        // Update schedule available seats
-                        if ($schedule_id == $booking['current_schedule_id']) {
-                            // Same schedule - just update counts
-                            $update_schedule = $conn->prepare("
-                                UPDATE movie_schedules 
-                                SET available_seats = available_seats - ? + ?
-                                WHERE id = ?
-                            ");
-                            $seats_added = count($seat_details);
-                            $seats_removed = count($current_seats_array);
-                            $update_schedule->bind_param("iii", $seats_added, $seats_removed, $schedule_id);
-                        } else {
-                            // New schedule - just subtract new seats
+                        $delete_old_seats = $conn->prepare("
+                            DELETE FROM booked_seats 
+                            WHERE booking_id = ?
+                        ");
+                        $delete_old_seats->bind_param("i", $booking_id);
+                        if (!$delete_old_seats->execute()) {
+                            throw new Exception("Failed to update booked seats record");
+                        }
+                        $delete_old_seats->close();
+                        
+                        $insert_new_seats = $conn->prepare("
+                            INSERT INTO booked_seats (booking_id, seat_number, seat_type, price)
+                            VALUES (?, ?, ?, ?)
+                        ");
+                        
+                        foreach ($new_seat_details as $seat) {
+                            $seat_type = $seat['type'];
+                            $seat_price = $seat['price'];
+                            $insert_new_seats->bind_param("issd", $booking_id, $seat['number'], $seat_type, $seat_price);
+                            if (!$insert_new_seats->execute()) {
+                                throw new Exception("Failed to insert booked seat: " . $seat['number']);
+                            }
+                        }
+                        $insert_new_seats->close();
+                        
+                        $net_change = count($seats_to_add) - count($seats_to_remove);
+                        if ($net_change != 0 && $schedule_id == $booking['current_schedule_id']) {
                             $update_schedule = $conn->prepare("
                                 UPDATE movie_schedules 
                                 SET available_seats = available_seats - ?
                                 WHERE id = ?
                             ");
-                            $seats_added = count($seat_details);
-                            $update_schedule->bind_param("ii", $seats_added, $schedule_id);
+                            $update_schedule->bind_param("ii", $net_change, $schedule_id);
+                            if (!$update_schedule->execute()) {
+                                throw new Exception("Failed to update schedule availability!");
+                            }
+                            $update_schedule->close();
+                        } elseif ($schedule_id != $booking['current_schedule_id']) {
+                            $update_schedule = $conn->prepare("
+                                UPDATE movie_schedules 
+                                SET available_seats = available_seats - ?
+                                WHERE id = ?
+                            ");
+                            $new_seat_count = count($seats_to_add);
+                            $update_schedule->bind_param("ii", $new_seat_count, $schedule_id);
+                            if (!$update_schedule->execute()) {
+                                throw new Exception("Failed to update new schedule!");
+                            }
+                            $update_schedule->close();
                         }
-                        
-                        if (!$update_schedule->execute()) {
-                            throw new Exception("Failed to update schedule availability!");
-                        }
-                        $update_schedule->close();
                         
                         $conn->commit();
                         
                         $success = "Rebooking successful! Your seats have been updated.";
                         $selected_seats = [];
                         
-                        // Refresh booking data
-                        header("Refresh:0");
+                        header("Refresh:2; url=" . SITE_URL . "index.php?page=customer/my-bookings");
                         exit();
                         
                     } catch (Exception $e) {
@@ -352,7 +351,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_rebooking']))
     }
 }
 
-// Get available seats for selected schedule
 $seats = [];
 $selected_schedule_data = null;
 $seat_prices = [];
@@ -378,7 +376,6 @@ if ($selected_schedule_id > 0) {
     }
     $schedule_info->close();
     
-    // Get all available seats (we'll show all types, but selection will be validated)
     $seats_stmt = $conn->prepare("
         SELECT seat_number, is_available, seat_type, price 
         FROM seat_availability 
@@ -395,7 +392,6 @@ if ($selected_schedule_id > 0) {
     $seats_stmt->close();
 }
 
-// Count available seats by type for each schedule
 $type_counts = [];
 if (!empty($schedules)) {
     foreach ($schedules as $schedule) {
@@ -868,12 +864,10 @@ document.addEventListener('DOMContentLoaded', function() {
         let isValid = true;
         let message = [];
         
-        // Check if total count matches
         if (selected.length !== maxSeats) {
             return { valid: false, message: `Please select exactly ${maxSeats} seat(s).` };
         }
         
-        // Check each seat type count
         for (let type in originalSeatCounts) {
             if ((counts[type] || 0) !== originalSeatCounts[type]) {
                 isValid = false;
@@ -881,7 +875,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        // Check for extra seat types
         for (let type in counts) {
             if (!originalSeatCounts[type]) {
                 isValid = false;
@@ -903,7 +896,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (selectedCount) {
             selectedCount.textContent = selected.length;
             
-            // Check if counts match
             let allMatch = true;
             for (let type in originalSeatCounts) {
                 if ((counts[type] || 0) !== originalSeatCounts[type]) {
