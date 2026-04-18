@@ -7,7 +7,7 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'Admin') {
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role']) || ($_SESSION['user_role'] !== 'Admin' && $_SESSION['user_role'] !== 'Owner')) {
     header("Location: " . SITE_URL . "index.php?page=login");
     exit();
 }
@@ -16,6 +16,8 @@ require_once $root_dir . '/partials/admin-header.php';
 
 $current_admin_id = $_SESSION['user_id'];
 $current_admin_name = $_SESSION['user_name'];
+$current_admin_role = $_SESSION['user_role'];
+$is_owner = ($current_admin_role === 'Owner');
 
 $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 if ($conn->connect_error) {
@@ -27,6 +29,10 @@ $success = '';
 $edit_mode = false;
 $edit_user = null;
 
+// Get owner account ID (the first Owner account created)
+$owner_result = $conn->query("SELECT u_id FROM users WHERE u_role = 'Owner' LIMIT 1");
+$owner_id = $owner_result ? ($owner_result->fetch_assoc()['u_id'] ?? null) : null;
+
 function log_admin_action($conn, $action, $details, $target_id = null) {
     global $current_admin_id;
     
@@ -36,67 +42,7 @@ function log_admin_action($conn, $action, $details, $target_id = null) {
     $stmt->close();
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_customer'])) {
-    $name = sanitize_input(trim($_POST['name']));
-    $username = sanitize_input(trim($_POST['username']));
-    $email = sanitize_input(trim($_POST['email']));
-    $password = sanitize_input(trim($_POST['password']));
-    $confirm_password = sanitize_input(trim($_POST['confirm_password']));
-    $role = 'Customer';
-    
-    if (empty($name) || empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
-        $error = "All fields are required!";
-    } elseif ($password !== $confirm_password) {
-        $error = "Passwords do not match!";
-    } elseif (strlen($password) < 6) {
-        $error = "Password must be at least 6 characters!";
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $error = "Invalid email format!";
-    } elseif (!preg_match('/^[a-zA-Z0-9_]{3,50}$/', $username)) {
-        $error = "Username must be 3-50 characters and can only contain letters, numbers, and underscores!";
-    } else {
-        $check_username = $conn->prepare("SELECT u_id FROM users WHERE u_username = ?");
-        $check_username->bind_param("s", $username);
-        $check_username->execute();
-        $username_result = $check_username->get_result();
-        
-        if ($username_result->num_rows > 0) {
-            $error = "Username already taken! Please choose a different username.";
-        } else {
-            $check_username->close();
-            
-            $check_email = $conn->prepare("SELECT u_id FROM users WHERE u_email = ?");
-            $check_email->bind_param("s", $email);
-            $check_email->execute();
-            $email_result = $check_email->get_result();
-            
-            if ($email_result->num_rows > 0) {
-                $error = "Email already registered! Please use a different email.";
-            } else {
-                $check_email->close();
-                
-                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-                
-                $stmt = $conn->prepare("INSERT INTO users (u_name, u_username, u_email, u_pass, u_role, u_status, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, 'Active', ?, ?)");
-                $stmt->bind_param("sssssis", $name, $username, $email, $hashed_password, $role, $current_admin_id, $current_admin_name);
-                
-                if ($stmt->execute()) {
-                    $new_user_id = $stmt->insert_id;
-                    $success = "Customer account created successfully!";
-                    
-                    log_admin_action($conn, 'ADD_CUSTOMER', "Added new customer: $name ($email)", $new_user_id);
-                    
-                    $_POST = array();
-                } else {
-                    $error = "Failed to create customer: " . $conn->error;
-                }
-                
-                $stmt->close();
-            }
-        }
-    }
-}
-
+// ADD NEW ADMIN ACCOUNT (Admin or Owner can do this)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_admin'])) {
     $name = sanitize_input(trim($_POST['name']));
     $email = sanitize_input(trim($_POST['email']));
@@ -146,6 +92,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_admin'])) {
     }
 }
 
+// ADD NEW CUSTOMER ACCOUNT (Admin or Owner can do this)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_customer'])) {
+    $name = sanitize_input(trim($_POST['customer_name']));
+    $username = sanitize_input(trim($_POST['customer_username']));
+    $email = sanitize_input(trim($_POST['customer_email']));
+    $password = sanitize_input(trim($_POST['customer_password']));
+    $confirm_password = sanitize_input(trim($_POST['customer_confirm_password']));
+    $role = 'Customer';
+    
+    if (empty($name) || empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
+        $error = "All customer fields are required!";
+    } elseif ($password !== $confirm_password) {
+        $error = "Passwords do not match!";
+    } elseif (strlen($password) < 6) {
+        $error = "Password must be at least 6 characters!";
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $error = "Invalid email format!";
+    } elseif (!preg_match('/^[a-zA-Z0-9_]{3,50}$/', $username)) {
+        $error = "Username must be 3-50 characters and can only contain letters, numbers, and underscores!";
+    } else {
+        $check_username = $conn->prepare("SELECT u_id FROM users WHERE u_username = ?");
+        $check_username->bind_param("s", $username);
+        $check_username->execute();
+        $username_result = $check_username->get_result();
+        
+        if ($username_result->num_rows > 0) {
+            $error = "Username already taken! Please choose a different username.";
+        } else {
+            $check_username->close();
+            
+            $check_email = $conn->prepare("SELECT u_id FROM users WHERE u_email = ?");
+            $check_email->bind_param("s", $email);
+            $check_email->execute();
+            $email_result = $check_email->get_result();
+            
+            if ($email_result->num_rows > 0) {
+                $error = "Email already registered! Please use a different email.";
+            } else {
+                $check_email->close();
+                
+                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+                
+                $stmt = $conn->prepare("INSERT INTO users (u_name, u_username, u_email, u_pass, u_role, u_status, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, 'Active', ?, ?)");
+                $stmt->bind_param("sssssis", $name, $username, $email, $hashed_password, $role, $current_admin_id, $current_admin_name);
+                
+                if ($stmt->execute()) {
+                    $new_user_id = $stmt->insert_id;
+                    $success = "Customer account created successfully! Username: " . $username;
+                    
+                    log_admin_action($conn, 'ADD_CUSTOMER', "Added new customer: $name ($email)", $new_user_id);
+                    
+                    $_POST = array();
+                } else {
+                    $error = "Failed to create customer: " . $conn->error;
+                }
+                
+                $stmt->close();
+            }
+        }
+    }
+}
+
+// UPDATE ADMIN STATUS (Admin or Owner can do this, but Owner has more privileges)
 elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_admin'])) {
     $id = intval($_POST['id']);
     $status = sanitize_input(trim($_POST['status']));
@@ -157,7 +166,10 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_admin'])) 
     $user_data = $user_result->fetch_assoc();
     $user_stmt->close();
     
-    if ($user_data['u_role'] !== 'Admin') {
+    // Check if this is the owner account - PROTECT OWNER
+    if ($id == $owner_id) {
+        $error = "Cannot modify the Owner account!";
+    } elseif ($user_data['u_role'] !== 'Admin') {
         $error = "You can only edit other administrators!";
     } elseif ($id == $current_admin_id && $status == 'Inactive') {
         $error = "You cannot deactivate your own account!";
@@ -176,6 +188,7 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_admin'])) 
     }
 }
 
+// RESET ADMIN PASSWORD (Admin or Owner can do this)
 elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_admin_password'])) {
     $id = intval($_POST['id']);
     $new_password = sanitize_input(trim($_POST['new_password']));
@@ -194,10 +207,10 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_admin_passw
         $error = "Passwords do not match!";
     } elseif (strlen($new_password) < 6) {
         $error = "Password must be at least 6 characters!";
+    } elseif ($id == $owner_id) {
+        $error = "Cannot reset password for the Owner account!";
     } elseif ($user_data['u_role'] !== 'Admin') {
         $error = "You can only reset passwords for other administrators!";
-    } elseif ($user_data['created_by'] == null) {
-        $error = "Cannot reset password for system-created admin accounts.";
     } else {
         $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
         $stmt = $conn->prepare("UPDATE users SET u_pass = ? WHERE u_id = ?");
@@ -214,12 +227,13 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_admin_passw
     }
 }
 
+// RESET CUSTOMER PASSWORD (Admin or Owner can do this for any customer)
 elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_customer_password'])) {
     $id = intval($_POST['id']);
     $new_password = sanitize_input(trim($_POST['new_password']));
     $confirm_password = sanitize_input(trim($_POST['confirm_password']));
     
-    $user_stmt = $conn->prepare("SELECT u_name, u_email, u_role, created_by FROM users WHERE u_id = ?");
+    $user_stmt = $conn->prepare("SELECT u_name, u_email, u_role FROM users WHERE u_id = ?");
     $user_stmt->bind_param("i", $id);
     $user_stmt->execute();
     $user_result = $user_stmt->get_result();
@@ -234,8 +248,6 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_customer_pa
         $error = "Password must be at least 6 characters!";
     } elseif ($user_data['u_role'] !== 'Customer') {
         $error = "Invalid user type!";
-    } elseif ($user_data['created_by'] == null) {
-        $error = "Cannot reset password for self-registered customers. Please ask them to use the 'Forgot Password' feature.";
     } else {
         $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
         $stmt = $conn->prepare("UPDATE users SET u_pass = ? WHERE u_id = ?");
@@ -252,8 +264,9 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_customer_pa
     }
 }
 
-elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
-    $id = intval($_GET['delete']);
+// DELETE CUSTOMER (Admin or Owner can delete any customer)
+elseif (isset($_GET['delete_customer']) && is_numeric($_GET['delete_customer'])) {
+    $id = intval($_GET['delete_customer']);
     
     $user_stmt = $conn->prepare("SELECT u_name, u_email, u_role FROM users WHERE u_id = ?");
     $user_stmt->bind_param("i", $id);
@@ -264,12 +277,45 @@ elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     
     if (!$user_data) {
         $error = "User not found!";
+    } elseif ($user_data['u_role'] !== 'Customer') {
+        $error = "Only customer accounts can be deleted!";
+    } else {
+        // Soft delete - set status to Inactive
+        $stmt = $conn->prepare("UPDATE users SET u_status = 'Inactive', is_visible = 0 WHERE u_id = ?");
+        $stmt->bind_param("i", $id);
+        
+        if ($stmt->execute()) {
+            $success = "Customer account deleted successfully!";
+            
+            log_admin_action($conn, 'DELETE_CUSTOMER', "Deleted customer: {$user_data['u_name']} ({$user_data['u_email']})", $id);
+        } else {
+            $error = "Failed to delete customer: " . $stmt->error;
+        }
+        $stmt->close();
+    }
+}
+
+// DELETE ADMIN (Admin or Owner can delete other admins, but Owner cannot be deleted) - PROTECT OWNER
+elseif (isset($_GET['delete_admin']) && is_numeric($_GET['delete_admin'])) {
+    $id = intval($_GET['delete_admin']);
+    
+    $user_stmt = $conn->prepare("SELECT u_name, u_email, u_role FROM users WHERE u_id = ?");
+    $user_stmt->bind_param("i", $id);
+    $user_stmt->execute();
+    $user_result = $user_stmt->get_result();
+    $user_data = $user_result->fetch_assoc();
+    $user_stmt->close();
+    
+    if (!$user_data) {
+        $error = "User not found!";
+    } elseif ($id == $owner_id) {
+        $error = "Cannot delete the Owner account!";
     } elseif ($id == $current_admin_id) {
         $error = "You cannot delete your own account!";
     } elseif ($user_data['u_role'] !== 'Admin') {
-        $error = "You can only delete other administrators! Customer accounts cannot be deleted.";
+        $error = "You can only delete other administrators!";
     } else {
-        $stmt = $conn->prepare("UPDATE users SET u_status = 'Inactive' WHERE u_id = ?");
+        $stmt = $conn->prepare("UPDATE users SET u_status = 'Inactive', is_visible = 0 WHERE u_id = ?");
         $stmt->bind_param("i", $id);
         
         if ($stmt->execute()) {
@@ -283,15 +329,18 @@ elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     }
 }
 
+// Get all users
 $users_result = $conn->query("
-    SELECT u_id, u_name, u_username, u_email, u_role, u_status, created_at, created_by, created_by_name,
+    SELECT u_id, u_name, u_username, u_email, u_role, u_status, created_at, created_by, created_by_name, last_login,
            CASE 
-               WHEN created_by IS NULL THEN 'System'
+               WHEN created_by IS NULL THEN 'Self-Registered'
                ELSE created_by_name
            END as creator_display
     FROM users 
+    WHERE (u_status = 'Active' OR (u_status = 'Inactive' AND is_visible = 1)) AND is_visible = 1
     ORDER BY 
         CASE u_role 
+            WHEN 'Owner' THEN 0
             WHEN 'Admin' THEN 1 
             WHEN 'Customer' THEN 2 
             ELSE 3 
@@ -300,13 +349,16 @@ $users_result = $conn->query("
 ");
 
 $users = [];
+$owner = null;
 $admins = [];
 $customers = [];
 
 if ($users_result) {
     while ($row = $users_result->fetch_assoc()) {
         $users[] = $row;
-        if ($row['u_role'] === 'Admin') {
+        if ($row['u_role'] === 'Owner') {
+            $owner = $row;
+        } elseif ($row['u_role'] === 'Admin') {
             $admins[] = $row;
         } else {
             $customers[] = $row;
@@ -314,6 +366,43 @@ if ($users_result) {
     }
 }
 
+// Get customer activity log with login and booking info
+$customer_activity_log = [];
+$customer_log_result = $conn->query("
+    SELECT 
+        cal.id,
+        cal.customer_id,
+        cal.action_type,
+        cal.details,
+        cal.created_at,
+        u.u_name as customer_name,
+        u.u_email as customer_email,
+        u.last_login,
+        CASE 
+            WHEN cal.action_type = 'BOOKING' THEN CONCAT('Booked movie - ', cal.details)
+            WHEN cal.action_type = 'MOVIE_VIEW' THEN CONCAT('Viewed movie - ', cal.details)
+            WHEN cal.action_type = 'LOGIN' THEN 'Logged in to account'
+            ELSE cal.details
+        END as full_details,
+        CASE 
+            WHEN cal.action_type = 'BOOKING' THEN 'booking'
+            WHEN cal.action_type = 'LOGIN' THEN 'login'
+            ELSE 'other'
+        END as activity_type
+    FROM customer_activity_log cal
+    LEFT JOIN users u ON cal.customer_id = u.u_id
+    WHERE u.u_role = 'Customer' AND (u.is_visible = 1 OR u.is_visible IS NULL)
+    ORDER BY cal.created_at DESC
+    LIMIT 50
+");
+
+if ($customer_log_result) {
+    while ($row = $customer_log_result->fetch_assoc()) {
+        $customer_activity_log[] = $row;
+    }
+}
+
+// Get admin activity log
 $admin_activity_log = [];
 $admin_log_result = $conn->query("
     SELECT al.*, u.u_name as admin_name
@@ -326,32 +415,6 @@ $admin_log_result = $conn->query("
 if ($admin_log_result) {
     while ($row = $admin_log_result->fetch_assoc()) {
         $admin_activity_log[] = $row;
-    }
-}
-
-$customer_activity_log = [];
-$customer_log_result = $conn->query("
-    SELECT 
-        cal.action_type,
-        cal.created_at,
-        cal.details,
-        u.u_name as customer_name,
-        u.u_email as customer_email,
-        CASE 
-            WHEN cal.action_type = 'BOOKING' THEN CONCAT('Booked movie - ', cal.details)
-            WHEN cal.action_type = 'MOVIE_VIEW' THEN CONCAT('Viewed movie - ', cal.details)
-            ELSE cal.details
-        END as full_details
-    FROM customer_activity_log cal
-    LEFT JOIN users u ON cal.customer_id = u.u_id
-    WHERE u.u_role = 'Customer'
-    ORDER BY cal.created_at DESC
-    LIMIT 50
-");
-
-if ($customer_log_result) {
-    while ($row = $customer_log_result->fetch_assoc()) {
-        $customer_activity_log[] = $row;
     }
 }
 
@@ -370,72 +433,6 @@ foreach ($customers as $customer) {
 
 $total_users = count($users);
 
-if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
-    $edit_id = intval($_GET['edit']);
-    $stmt = $conn->prepare("
-        SELECT u_id, u_name, u_email, u_role, u_status, created_at, created_by
-        FROM users 
-        WHERE u_id = ? AND u_role = 'Admin'
-    ");
-    if ($stmt) {
-        $stmt->bind_param("i", $edit_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $edit_user = $result->fetch_assoc();
-        $edit_mode = !empty($edit_user);
-        $stmt->close();
-    }
-}
-
-$movie_activity_result = $conn->query("
-    SELECT 
-        'MOVIE_ADDED' as action,
-        m.title as details,
-        u.u_name as admin_name,
-        m.created_at,
-        CONCAT('Added movie: ', m.title) as full_details
-    FROM movies m
-    LEFT JOIN users u ON m.added_by = u.u_id
-    WHERE m.is_active = 1
-    UNION ALL
-    SELECT 
-        'MOVIE_UPDATED' as action,
-        m.title as details,
-        u.u_name as admin_name,
-        m.last_updated as created_at,
-        CONCAT('Updated movie: ', m.title) as full_details
-    FROM movies m
-    LEFT JOIN users u ON m.updated_by = u.u_id
-    WHERE m.last_updated IS NOT NULL
-    UNION ALL
-    SELECT 
-        'SCHEDULE_ADDED' as action,
-        CONCAT(s.movie_title, ' on ', s.show_date, ' at ', s.showtime) as details,
-        u.u_name as admin_name,
-        s.created_at,
-        CONCAT('Added schedule: ', s.movie_title, ' on ', s.show_date, ' at ', TIME_FORMAT(s.showtime, '%h:%i %p')) as full_details
-    FROM movie_schedules s
-    LEFT JOIN users u ON s.id = s.id
-    WHERE s.is_active = 1
-    UNION ALL
-    SELECT 
-        'SEAT_UPDATED' as action,
-        CONCAT('Schedule #', sa.schedule_id, ' - ', sa.seat_number) as details,
-        'System' as admin_name,
-        NOW() as created_at,
-        CONCAT('Updated seat: ', sa.seat_number, ' for schedule #', sa.schedule_id) as full_details
-    FROM seat_availability sa
-    ORDER BY created_at DESC
-    LIMIT 30
-");
-
-$movie_activity_log = [];
-if ($movie_activity_result) {
-    while ($row = $movie_activity_result->fetch_assoc()) {
-        $movie_activity_log[] = $row;
-    }
-}
-
 $conn->close();
 ?>
 
@@ -443,7 +440,7 @@ $conn->close();
     <div style="text-align: center; margin-bottom: 40px; padding: 30px; background: linear-gradient(135deg, rgba(52, 152, 219, 0.1), rgba(41, 128, 185, 0.2)); border-radius: 20px; border: 2px solid rgba(52, 152, 219, 0.3);">
         <h1 style="color: white; font-size: 2.5rem; margin-bottom: 15px; font-weight: 800;">Manage Users</h1>
         <p style="color: rgba(255, 255, 255, 0.8); font-size: 1.1rem;">Create and manage user accounts</p>
-        <p style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem; margin-top: 10px;">Logged in as: <strong style="color: #3498db;"><?php echo $current_admin_name; ?></strong></p>
+        <p style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem; margin-top: 10px;">Logged in as: <strong style="color: #3498db;"><?php echo $current_admin_name; ?></strong> (<?php echo $current_admin_role; ?>)</p>
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 40px;">
@@ -452,7 +449,7 @@ $conn->close();
             <div style="color: white; font-size: 1rem; font-weight: 600;">Total Users</div>
         </div>
         <div style="background: rgba(52, 152, 219, 0.1); border-radius: 12px; padding: 25px; text-align: center; border: 1px solid rgba(52, 152, 219, 0.3);">
-            <div style="font-size: 2.5rem; color: #3498db; margin-bottom: 10px; font-weight: 700;"><?php echo $admin_count; ?></div>
+            <div style="font-size: 2.5rem; color: #3498db; margin-bottom: 10px; font-weight: 700;"><?php echo $admin_count + ($owner ? 1 : 0); ?></div>
             <div style="color: white; font-size: 1rem; font-weight: 600;">Total Admins</div>
             <div style="font-size: 0.8rem; color: rgba(255, 255, 255, 0.6); margin-top: 5px;"><?php echo $active_admin_count; ?> active</div>
         </div>
@@ -460,11 +457,6 @@ $conn->close();
             <div style="font-size: 2.5rem; color: #3498db; margin-bottom: 10px; font-weight: 700;"><?php echo $customer_count; ?></div>
             <div style="color: white; font-size: 1rem; font-weight: 600;">Total Customers</div>
             <div style="font-size: 0.8rem; color: rgba(255, 255, 255, 0.6); margin-top: 5px;"><?php echo $active_customer_count; ?> active</div>
-        </div>
-        <div style="background: rgba(52, 152, 219, 0.1); border-radius: 12px; padding: 25px; text-align: center; border: 1px solid rgba(52, 152, 219, 0.3);">
-            <div style="font-size: 2.5rem; color: #3498db; margin-bottom: 10px; font-weight: 700;"><?php echo count($admin_activity_log); ?></div>
-            <div style="color: white; font-size: 1rem; font-weight: 600;">Admin Actions</div>
-            <div style="font-size: 0.8rem; color: rgba(255, 255, 255, 0.6); margin-top: 5px;">Recent activities</div>
         </div>
     </div>
 
@@ -480,13 +472,68 @@ $conn->close();
         </div>
     <?php endif; ?>
 
+    <!-- Add New Admin Form -->
     <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(52, 152, 219, 0.2);">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-user-plus"></i> Create New Customer Account
+            <i class="fas fa-user-plus"></i> Add New Admin Account
         </h2>
-        <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 25px; font-size: 0.95rem;">
-            <i class="fas fa-info-circle"></i> Use this form to create accounts for customers who need assistance with registration.
-        </p>
+        
+        <form method="POST" action="" id="adminForm">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px; margin-bottom: 30px;">
+                <div>
+                    <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
+                        <i class="fas fa-user"></i> Full Name *
+                    </label>
+                    <input type="text" name="name" required 
+                           value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>"
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
+                           placeholder="Enter admin's full name">
+                </div>
+                
+                <div>
+                    <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
+                        <i class="fas fa-envelope"></i> Email Address *
+                    </label>
+                    <input type="email" name="email" required 
+                           value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>"
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
+                           placeholder="Enter admin's email">
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px; margin-bottom: 30px;">
+                <div>
+                    <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
+                        <i class="fas fa-lock"></i> Password *
+                    </label>
+                    <input type="password" name="password" required 
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
+                           placeholder="At least 6 characters">
+                </div>
+                
+                <div>
+                    <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
+                        <i class="fas fa-lock"></i> Confirm Password *
+                    </label>
+                    <input type="password" name="confirm_password" required 
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
+                           placeholder="Confirm password">
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <button type="submit" name="add_admin" style="padding: 16px 45px; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; border: none; border-radius: 12px; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3); display: inline-flex; align-items: center; justify-content: center; gap: 10px;">
+                    <i class="fas fa-plus"></i> Add Admin Account
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Add New Customer Form -->
+    <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(52, 152, 219, 0.2);">
+        <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
+            <i class="fas fa-user-plus"></i> Add New Customer Account
+        </h2>
         
         <form method="POST" action="" id="customerForm">
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px; margin-bottom: 30px;">
@@ -494,8 +541,8 @@ $conn->close();
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-user"></i> Full Name *
                     </label>
-                    <input type="text" id="customer_name" name="name" required 
-                           value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>"
+                    <input type="text" name="customer_name" required 
+                           value="<?php echo isset($_POST['customer_name']) ? htmlspecialchars($_POST['customer_name']) : ''; ?>"
                            style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
                            placeholder="Enter customer's full name">
                 </div>
@@ -504,8 +551,8 @@ $conn->close();
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-at"></i> Username *
                     </label>
-                    <input type="text" id="customer_username" name="username" required 
-                           value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>"
+                    <input type="text" name="customer_username" required 
+                           value="<?php echo isset($_POST['customer_username']) ? htmlspecialchars($_POST['customer_username']) : ''; ?>"
                            style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
                            placeholder="Choose a username (3-50 characters)"
                            pattern="[a-zA-Z0-9_]+"
@@ -516,8 +563,8 @@ $conn->close();
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-envelope"></i> Email Address *
                     </label>
-                    <input type="email" id="customer_email" name="email" required 
-                           value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>"
+                    <input type="email" name="customer_email" required 
+                           value="<?php echo isset($_POST['customer_email']) ? htmlspecialchars($_POST['customer_email']) : ''; ?>"
                            style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
                            placeholder="Enter customer's email">
                 </div>
@@ -528,7 +575,7 @@ $conn->close();
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-lock"></i> Password *
                     </label>
-                    <input type="password" id="customer_password" name="password" required 
+                    <input type="password" name="customer_password" required 
                            style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
                            placeholder="At least 6 characters">
                 </div>
@@ -537,7 +584,7 @@ $conn->close();
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-lock"></i> Confirm Password *
                     </label>
-                    <input type="password" id="customer_confirm_password" name="confirm_password" required 
+                    <input type="password" name="customer_confirm_password" required 
                            style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
                            placeholder="Confirm password">
                 </div>
@@ -545,21 +592,53 @@ $conn->close();
             
             <div style="text-align: center; margin-top: 30px;">
                 <button type="submit" name="add_customer" style="padding: 16px 45px; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; border: none; border-radius: 12px; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3); display: inline-flex; align-items: center; justify-content: center; gap: 10px;">
-                    <i class="fas fa-plus"></i> Create Customer Account
+                    <i class="fas fa-plus"></i> Add Customer Account
                 </button>
             </div>
         </form>
     </div>
 
+    <!-- Owner Section (if exists) - PROTECTED DISPLAY -->
+    <?php if ($owner): ?>
+    <div style="background: rgba(255, 215, 0, 0.1); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 2px solid #ffd700; border-left: 10px solid #ffd700;">
+        <h2 style="color: #ffd700; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #ffd700; display: flex; align-items: center; gap: 10px;">
+            <i class="fas fa-crown"></i> Owner Account
+        </h2>
+        
+        <div style="background: rgba(255, 215, 0, 0.05); border-radius: 10px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
+                <div>
+                    <div style="color: white; font-size: 1.2rem; font-weight: 700; margin-bottom: 5px;">
+                        <?php echo htmlspecialchars($owner['u_name']); ?>
+                        <span style="background: #ffd700; color: #333; padding: 3px 12px; border-radius: 20px; font-size: 0.75rem; margin-left: 10px;">OWNER</span>
+                    </div>
+                    <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">
+                        <?php echo htmlspecialchars($owner['u_email']); ?> • Username: <?php echo htmlspecialchars($owner['u_username']); ?>
+                    </div>
+                    <div style="color: rgba(255, 255, 255, 0.5); font-size: 0.85rem; margin-top: 5px;">
+                        Last login: <?php echo $owner['last_login'] ? date('M d, Y h:i A', strtotime($owner['last_login'])) : 'Never'; ?>
+                    </div>
+                </div>
+                <div>
+                    <span style="background: rgba(255, 215, 0, 0.2); color: #ffd700; padding: 8px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">
+                        <i class="fas fa-shield-alt"></i> Protected Account - Cannot be modified
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- Administrators Section -->
     <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(52, 152, 219, 0.2);">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-crown"></i> Administrators (<?php echo $admin_count; ?>)
+            <i class="fas fa-crown"></i> Administrators (<?php echo count($admins); ?>)
         </h2>
         
         <?php if (empty($admins)): ?>
         <div style="text-align: center; padding: 50px; color: rgba(255, 255, 255, 0.6);">
             <i class="fas fa-crown fa-3x" style="margin-bottom: 20px; opacity: 0.5;"></i>
-            <p style="font-size: 1.1rem;">No administrators found. Add your first admin!</p>
+            <p style="font-size: 1.1rem;">No other administrators found.</p>
         </div>
         <?php else: ?>
         <div style="overflow-x: auto; border-radius: 10px; border: 1px solid rgba(52, 152, 219, 0.2);">
@@ -576,7 +655,6 @@ $conn->close();
                 <tbody>
                     <?php foreach ($admins as $admin): 
                         $is_current_user = $admin['u_id'] == $current_admin_id;
-                        $can_reset_password = $admin['created_by'] != null;
                     ?>
                     <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1); <?php echo $is_current_user ? 'background: rgba(52, 152, 219, 0.05);' : ''; ?>">
                         <td style="padding: 16px; color: rgba(255, 255, 255, 0.9); font-weight: 700;"><?php echo $admin['u_id']; ?></td>
@@ -591,10 +669,13 @@ $conn->close();
                                 <?php echo htmlspecialchars($admin['u_email']); ?><br>
                                 <small>Username: <?php echo htmlspecialchars($admin['u_username']); ?></small>
                             </div>
+                            <div style="color: rgba(255, 255, 255, 0.5); font-size: 0.8rem; margin-top: 3px;">
+                                Last login: <?php echo $admin['last_login'] ? date('M d, Y h:i A', strtotime($admin['last_login'])) : 'Never'; ?>
+                            </div>
                         </td>
                         <td style="padding: 16px;">
-                            <span style="background: <?php echo $admin['creator_display'] == 'System' ? 'rgba(149,165,166,0.2)' : 'rgba(52,152,219,0.2)'; ?>; color: <?php echo $admin['creator_display'] == 'System' ? '#95a5a6' : '#3498db'; ?>; padding: 5px 10px; border-radius: 15px; font-size: 0.8rem; font-weight: 600;">
-                                <i class="fas <?php echo $admin['creator_display'] == 'System' ? 'fa-cog' : 'fa-user-cog'; ?>"></i>
+                            <span style="background: <?php echo $admin['creator_display'] == 'Self-Registered' ? 'rgba(149,165,166,0.2)' : 'rgba(52,152,219,0.2)'; ?>; color: <?php echo $admin['creator_display'] == 'Self-Registered' ? '#95a5a6' : '#3498db'; ?>; padding: 5px 10px; border-radius: 15px; font-size: 0.8rem; font-weight: 600;">
+                                <i class="fas <?php echo $admin['creator_display'] == 'Self-Registered' ? 'fa-user' : 'fa-user-cog'; ?>"></i>
                                 <?php echo $admin['creator_display']; ?>
                             </span>
                         </td>
@@ -613,16 +694,14 @@ $conn->close();
                                     <i class="fas fa-edit"></i> Edit
                                 </button>
                                 
-                                <?php if ($can_reset_password && !$is_current_user): ?>
                                 <button type="button" 
                                         style="padding: 8px 16px; background: rgba(23, 162, 184, 0.2); color: #17a2b8; border: 1px solid rgba(23, 162, 184, 0.3); border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;"
                                         onclick="openResetPasswordModal(<?php echo $admin['u_id']; ?>, '<?php echo addslashes($admin['u_name']); ?>', 'admin')">
                                     <i class="fas fa-key"></i> Reset Password
                                 </button>
-                                <?php endif; ?>
                                 
                                 <?php if (!$is_current_user): ?>
-                                <a href="index.php?page=admin/manage-users&delete=<?php echo $admin['u_id']; ?>" 
+                                <a href="index.php?page=admin/manage-users&delete_admin=<?php echo $admin['u_id']; ?>" 
                                    style="padding: 8px 16px; background: rgba(231, 76, 60, 0.2); color: #e74c3c; text-decoration: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; border: 1px solid rgba(231, 76, 60, 0.3); display: inline-flex; align-items: center; gap: 5px;"
                                    onclick="return confirm('Are you sure you want to delete admin \'<?php echo addslashes($admin['u_name']); ?>\'?\nThis will deactivate their account.')">
                                     <i class="fas fa-trash"></i> Delete
@@ -638,6 +717,7 @@ $conn->close();
         <?php endif; ?>
     </div>
 
+    <!-- Customers Section -->
     <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(52, 152, 219, 0.2);">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
             <i class="fas fa-users"></i> Customers (<?php echo $customer_count; ?>)
@@ -650,7 +730,7 @@ $conn->close();
         </div>
         <?php else: ?>
         <div style="overflow-x: auto; border-radius: 10px; border: 1px solid rgba(52, 152, 219, 0.2);">
-            <table style="width: 100%; border-collapse: collapse; min-width: 900px;">
+            <table style="width: 100%; border-collapse: collapse; min-width: 1000px;">
                 <thead>
                     <tr>
                         <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">ID</th>
@@ -661,9 +741,7 @@ $conn->close();
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($customers as $customer): 
-                        $can_reset_password = $customer['created_by'] != null;
-                    ?>
+                    <?php foreach ($customers as $customer): ?>
                     <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
                         <td style="padding: 16px; color: rgba(255, 255, 255, 0.9); font-weight: 700;"><?php echo $customer['u_id']; ?></td>
                         <td style="padding: 16px;">
@@ -674,10 +752,13 @@ $conn->close();
                                 <?php echo htmlspecialchars($customer['u_email']); ?><br>
                                 <small>Username: <?php echo htmlspecialchars($customer['u_username']); ?></small>
                             </div>
+                            <div style="color: rgba(255, 255, 255, 0.5); font-size: 0.8rem; margin-top: 3px;">
+                                Last login: <?php echo $customer['last_login'] ? date('M d, Y h:i A', strtotime($customer['last_login'])) : 'Never'; ?>
+                            </div>
                         </td>
                         <td style="padding: 16px;">
-                            <span style="background: <?php echo $customer['creator_display'] == 'System' ? 'rgba(149,165,166,0.2)' : 'rgba(52,152,219,0.2)'; ?>; color: <?php echo $customer['creator_display'] == 'System' ? '#95a5a6' : '#3498db'; ?>; padding: 5px 10px; border-radius: 15px; font-size: 0.8rem; font-weight: 600;">
-                                <i class="fas <?php echo $customer['creator_display'] == 'System' ? 'fa-cog' : 'fa-user-cog'; ?>"></i>
+                            <span style="background: <?php echo $customer['creator_display'] == 'Self-Registered' ? 'rgba(149,165,166,0.2)' : 'rgba(52,152,219,0.2)'; ?>; color: <?php echo $customer['creator_display'] == 'Self-Registered' ? '#95a5a6' : '#3498db'; ?>; padding: 5px 10px; border-radius: 15px; font-size: 0.8rem; font-weight: 600;">
+                                <i class="fas <?php echo $customer['creator_display'] == 'Self-Registered' ? 'fa-user' : 'fa-user-cog'; ?>"></i>
                                 <?php echo $customer['creator_display']; ?>
                             </span>
                         </td>
@@ -689,17 +770,17 @@ $conn->close();
                         </td>
                         <td style="padding: 16px;">
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                <?php if ($can_reset_password): ?>
                                 <button type="button" 
                                         style="padding: 8px 16px; background: rgba(23, 162, 184, 0.2); color: #17a2b8; border: 1px solid rgba(23, 162, 184, 0.3); border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;"
                                         onclick="openResetPasswordModal(<?php echo $customer['u_id']; ?>, '<?php echo addslashes($customer['u_name']); ?>', 'customer')">
                                     <i class="fas fa-key"></i> Reset Password
                                 </button>
-                                <?php else: ?>
-                                <span style="padding: 8px 16px; background: rgba(149,165,166,0.1); color: #95a5a6; border-radius: 6px; font-size: 0.85rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; cursor: not-allowed;" title="Password cannot be reset for self-registered customers">
-                                    <i class="fas fa-key"></i> Password Locked
-                                </span>
-                                <?php endif; ?>
+                                
+                                <a href="index.php?page=admin/manage-users&delete_customer=<?php echo $customer['u_id']; ?>" 
+                                   style="padding: 8px 16px; background: rgba(231, 76, 60, 0.2); color: #e74c3c; text-decoration: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; border: 1px solid rgba(231, 76, 60, 0.3); display: inline-flex; align-items: center; gap: 5px;"
+                                   onclick="return confirm('Are you sure you want to delete customer \'<?php echo addslashes($customer['u_name']); ?>\'?\nThis will deactivate their account.')">
+                                    <i class="fas fa-trash"></i> Delete
+                                </a>
                             </div>
                         </td>
                     </tr>
@@ -710,28 +791,21 @@ $conn->close();
         <?php endif; ?>
     </div>
 
+    <!-- Activity Logs Section -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 30px; margin-bottom: 40px;">
         <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; border: 1px solid rgba(52, 152, 219, 0.2);">
             <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
                 <i class="fas fa-history"></i> Recent Admin Actions
             </h2>
             
-            <?php if (empty($admin_activity_log) && empty($movie_activity_log)): ?>
+            <?php if (empty($admin_activity_log)): ?>
             <div style="text-align: center; padding: 30px; color: rgba(255, 255, 255, 0.6);">
                 <i class="fas fa-history fa-2x" style="margin-bottom: 10px; opacity: 0.5;"></i>
                 <p>No recent admin actions found.</p>
             </div>
             <?php else: ?>
             <div style="max-height: 400px; overflow-y: auto; padding-right: 10px;">
-                <?php 
-                $all_activities = array_merge($admin_activity_log, $movie_activity_log);
-                usort($all_activities, function($a, $b) {
-                    return strtotime($b['created_at']) - strtotime($a['created_at']);
-                });
-                $recent_activities = array_slice($all_activities, 0, 20);
-                ?>
-                
-                <?php foreach ($recent_activities as $log): 
+                <?php foreach ($admin_activity_log as $log): 
                     $action_icon = 'fa-cog';
                     $action_color = '#3498db';
                     
@@ -747,15 +821,6 @@ $conn->close();
                     } elseif (strpos($log['action'], 'RESET') !== false) {
                         $action_icon = 'fa-key';
                         $action_color = '#9b59b6';
-                    } elseif (strpos($log['action'], 'MOVIE') !== false) {
-                        $action_icon = 'fa-film';
-                        $action_color = '#1abc9c';
-                    } elseif (strpos($log['action'], 'SCHEDULE') !== false) {
-                        $action_icon = 'fa-calendar';
-                        $action_color = '#e67e22';
-                    } elseif (strpos($log['action'], 'SEAT') !== false) {
-                        $action_icon = 'fa-chair';
-                        $action_color = '#8e44ad';
                     }
                 ?>
                 <div style="background: rgba(255, 255, 255, 0.03); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid <?php echo $action_color; ?>;">
@@ -772,10 +837,7 @@ $conn->close();
                                         'RESET_ADMIN_PASSWORD' => 'Reset Admin Password',
                                         'RESET_CUSTOMER_PASSWORD' => 'Reset Customer Password',
                                         'DELETE_ADMIN' => 'Deleted Admin',
-                                        'MOVIE_ADDED' => 'Added Movie',
-                                        'MOVIE_UPDATED' => 'Updated Movie',
-                                        'SCHEDULE_ADDED' => 'Added Schedule',
-                                        'SEAT_UPDATED' => 'Updated Seat'
+                                        'DELETE_CUSTOMER' => 'Deleted Customer'
                                     ];
                                     echo $action_map[$log['action']] ?? $log['action'];
                                     ?>
@@ -790,7 +852,7 @@ $conn->close();
                         </div>
                     </div>
                     <div style="color: rgba(255, 255, 255, 0.8); font-size: 0.9rem; padding-left: 30px;">
-                        <?php echo htmlspecialchars($log['full_details'] ?? $log['details']); ?>
+                        <?php echo htmlspecialchars($log['details']); ?>
                     </div>
                 </div>
                 <?php endforeach; ?>
@@ -800,7 +862,7 @@ $conn->close();
 
         <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; border: 1px solid rgba(52, 152, 219, 0.2);">
             <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
-                <i class="fas fa-user-clock"></i> Recent Customer Actions
+                <i class="fas fa-user-clock"></i> Recent Customer Activity
             </h2>
             
             <?php if (empty($customer_activity_log)): ?>
@@ -820,6 +882,9 @@ $conn->close();
                     } elseif ($log['action_type'] === 'MOVIE_VIEW') {
                         $action_icon = 'fa-eye';
                         $action_color = '#9b59b6';
+                    } elseif ($log['action_type'] === 'LOGIN') {
+                        $action_icon = 'fa-sign-in-alt';
+                        $action_color = '#f39c12';
                     }
                 ?>
                 <div style="background: rgba(255, 255, 255, 0.03); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid <?php echo $action_color; ?>;">
@@ -831,13 +896,14 @@ $conn->close();
                                     <?php 
                                     $action_map = [
                                         'BOOKING' => 'Movie Booking',
-                                        'MOVIE_VIEW' => 'Movie View'
+                                        'MOVIE_VIEW' => 'Movie View',
+                                        'LOGIN' => 'Login'
                                     ];
                                     echo $action_map[$log['action_type']] ?? $log['action_type'];
                                     ?>
                                 </div>
                                 <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.85rem;">
-                                    By: <strong style="color: #007bff;"><?php echo htmlspecialchars($log['customer_name']); ?></strong>
+                                    By: <strong style="color: #3498db;"><?php echo htmlspecialchars($log['customer_name']); ?></strong>
                                 </div>
                             </div>
                         </div>
@@ -846,7 +912,7 @@ $conn->close();
                         </div>
                     </div>
                     <div style="color: rgba(255, 255, 255, 0.8); font-size: 0.9rem; padding-left: 30px;">
-                        <?php echo htmlspecialchars($log['full_details'] ?? $log['details']); ?>
+                        <?php echo htmlspecialchars($log['full_details']); ?>
                     </div>
                 </div>
                 <?php endforeach; ?>
@@ -856,6 +922,7 @@ $conn->close();
     </div>
 </div>
 
+<!-- Edit Admin Modal -->
 <div id="editModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; padding: 20px;">
     <div style="background: #2c3e50; border-radius: 15px; padding: 30px; max-width: 500px; width: 100%; border: 1px solid rgba(52, 152, 219, 0.3);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(52, 152, 219, 0.3);">
@@ -896,6 +963,7 @@ $conn->close();
     </div>
 </div>
 
+<!-- Reset Password Modal -->
 <div id="resetPasswordModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; padding: 20px;">
     <div style="background: #2c3e50; border-radius: 15px; padding: 30px; max-width: 500px; width: 100%; border: 1px solid rgba(52, 152, 219, 0.3);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(52, 152, 219, 0.3);">
@@ -1061,11 +1129,10 @@ window.onclick = function(event) {
     }
 }
 
-document.getElementById('customerForm').addEventListener('submit', function(e) {
-    const password = document.getElementById('customer_password').value;
-    const confirmPassword = document.getElementById('customer_confirm_password').value;
-    const email = document.getElementById('customer_email').value;
-    const username = document.getElementById('customer_username').value;
+document.getElementById('adminForm')?.addEventListener('submit', function(e) {
+    const password = document.querySelector('input[name="password"]').value;
+    const confirmPassword = document.querySelector('input[name="confirm_password"]').value;
+    const email = document.querySelector('input[name="email"]').value;
     
     if (password.length < 6) {
         e.preventDefault();
@@ -1086,9 +1153,56 @@ document.getElementById('customerForm').addEventListener('submit', function(e) {
         return false;
     }
     
+    return true;
+});
+
+document.getElementById('customerForm')?.addEventListener('submit', function(e) {
+    const username = document.querySelector('input[name="customer_username"]').value;
+    const email = document.querySelector('input[name="customer_email"]').value;
+    const password = document.querySelector('input[name="customer_password"]').value;
+    const confirmPassword = document.querySelector('input[name="customer_confirm_password"]').value;
+    
+    if (password.length < 6) {
+        e.preventDefault();
+        alert('Password must be at least 6 characters!');
+        return false;
+    }
+    
+    if (password !== confirmPassword) {
+        e.preventDefault();
+        alert('Passwords do not match!');
+        return false;
+    }
+    
     if (!/^[a-zA-Z0-9_]{3,50}$/.test(username)) {
         e.preventDefault();
         alert('Username must be 3-50 characters and can only contain letters, numbers, and underscores!');
+        return false;
+    }
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        e.preventDefault();
+        alert('Please enter a valid email address!');
+        return false;
+    }
+    
+    return true;
+});
+
+document.getElementById('resetPasswordForm')?.addEventListener('submit', function(e) {
+    const newPassword = document.getElementById('new_password').value;
+    const confirmPassword = document.getElementById('confirm_new_password').value;
+    
+    if (newPassword.length < 6) {
+        e.preventDefault();
+        alert('Password must be at least 6 characters!');
+        return false;
+    }
+    
+    if (newPassword !== confirmPassword) {
+        e.preventDefault();
+        alert('Passwords do not match!');
         return false;
     }
     
@@ -1105,25 +1219,6 @@ inputs.forEach(input => {
         this.style.transition = 'none';
     });
 });
-
-setInterval(() => {
-    const now = new Date();
-    const timeElements = document.querySelectorAll('.activity-time');
-    timeElements.forEach(el => {
-        const time = new Date(el.dataset.time);
-        const diff = Math.floor((now - time) / 1000);
-        
-        if (diff < 60) {
-            el.textContent = 'Just now';
-        } else if (diff < 3600) {
-            el.textContent = Math.floor(diff / 60) + ' minutes ago';
-        } else if (diff < 86400) {
-            el.textContent = Math.floor(diff / 3600) + ' hours ago';
-        } else {
-            el.textContent = Math.floor(diff / 86400) + ' days ago';
-        }
-    });
-}, 60000);
 </script>
 
 </div>

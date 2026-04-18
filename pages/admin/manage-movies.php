@@ -34,6 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_movie'])) {
     $trailer_url = htmlspecialchars(trim($_POST['trailer_url'] ?? ''));
     $venue_name = htmlspecialchars(trim($_POST['venue_name'] ?? ''));
     $venue_location = htmlspecialchars(trim($_POST['venue_location'] ?? ''));
+    $google_maps_link = trim($_POST['google_maps_link'] ?? '');
     $standard_price = floatval($_POST['standard_price'] ?? 350);
     $premium_price = floatval($_POST['premium_price'] ?? 450);
     $sweet_spot_price = floatval($_POST['sweet_spot_price'] ?? 550);
@@ -41,8 +42,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_movie'])) {
     if (empty($title) || empty($genre) || empty($duration) || empty($rating) || empty($description)) {
         $error = "All required fields must be filled!";
     } else {
-        $stmt = $conn->prepare("INSERT INTO movies (title, director, genre, duration, rating, description, poster_url, trailer_url, venue_name, venue_location, standard_price, premium_price, sweet_spot_price, is_active, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)");
-        $stmt->bind_param("ssssssssssdddi", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id']);
+        $stmt = $conn->prepare("INSERT INTO movies (title, director, genre, duration, rating, description, poster_url, trailer_url, venue_name, venue_location, google_maps_link, standard_price, premium_price, sweet_spot_price, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("sssssssssssdddi", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $google_maps_link, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id']);
         
         if ($stmt->execute()) {
             $new_movie_id = $stmt->insert_id;
@@ -68,12 +69,14 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_movie'])) 
     $trailer_url = htmlspecialchars(trim($_POST['trailer_url'] ?? ''));
     $venue_name = htmlspecialchars(trim($_POST['venue_name'] ?? ''));
     $venue_location = htmlspecialchars(trim($_POST['venue_location'] ?? ''));
+    $google_maps_link = trim($_POST['google_maps_link'] ?? '');
     $standard_price = floatval($_POST['standard_price'] ?? 350);
     $premium_price = floatval($_POST['premium_price'] ?? 450);
     $sweet_spot_price = floatval($_POST['sweet_spot_price'] ?? 550);
     
-    $stmt = $conn->prepare("UPDATE movies SET title = ?, director = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, venue_name = ?, venue_location = ?, standard_price = ?, premium_price = ?, sweet_spot_price = ?, updated_by = ? WHERE id = ?");
-    $stmt->bind_param("ssssssssssddiii", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id'], $id);
+    // FIXED: Corrected the type string - 11 strings, 3 decimals, 2 integers = 16 total
+    $stmt = $conn->prepare("UPDATE movies SET title = ?, director = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, venue_name = ?, venue_location = ?, google_maps_link = ?, standard_price = ?, premium_price = ?, sweet_spot_price = ?, updated_by = ? WHERE id = ?");
+    $stmt->bind_param("sssssssssssdddii", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $google_maps_link, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id'], $id);
     
     if ($stmt->execute()) {
         $success = "Movie updated successfully!";
@@ -292,10 +295,14 @@ $conn->close();
                 <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                     <i class="fas fa-map"></i> Google Maps Link
                 </label>
-                <input type="url" id="google_maps_link" name="google_maps_link" 
-                       value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['google_maps_link'] ?? '') : (isset($_POST['google_maps_link']) ? htmlspecialchars($_POST['google_maps_link']) : ''); ?>"
+                <input type="text" id="google_maps_link" name="google_maps_link" 
+                       value="<?php echo $edit_mode ? ($edit_movie['google_maps_link'] ?? '') : (isset($_POST['google_maps_link']) ? $_POST['google_maps_link'] : ''); ?>"
                        style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                       placeholder="https://maps.google.com/?q=10.273055307646723,123.7611768131498">
+                       placeholder="https://www.google.com/maps/@10.2701001,123.7749591,3a,75y...">
+                <div style="margin-top: 8px; font-size: 0.85rem; color: rgba(255,255,255,0.6);">
+                    <i class="fas fa-info-circle"></i> 
+                    Paste the full Google Maps link here
+                </div>
             </div>
 
             <div style="margin-bottom: 30px;">

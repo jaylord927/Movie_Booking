@@ -654,7 +654,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="terms-agreement">
                     <input type="checkbox" name="terms" id="terms" required>
                     <label for="terms">
-                        I agree to the <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>
+                        I agree to the <a href="<?php echo SITE_URL; ?>index.php?page=privacypolicy_termsservice&tab=terms" target="_blank">Terms of Service</a> and <a href="<?php echo SITE_URL; ?>index.php?page=privacypolicy_termsservice&tab=privacy" target="_blank">Privacy Policy</a>
                     </label>
                 </div>
                 

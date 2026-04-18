@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Mar 14, 2026 at 02:33 PM
+-- Generation Time: Apr 18, 2026 at 12:20 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -63,11 +63,6 @@ INSERT INTO `booked_seats` (`id`, `booking_id`, `seat_number`, `seat_type`, `pri
 (4, 18, 'C08', 'Standard', 350.00, '2026-03-13 14:05:12'),
 (5, 19, 'E09', 'Standard', 350.00, '2026-03-13 14:23:15'),
 (6, 19, 'E10', 'Standard', 350.00, '2026-03-13 14:23:15'),
-(7, 20, 'E06', 'Standard', 350.00, '2026-03-13 14:38:54'),
-(8, 20, 'E07', 'Standard', 350.00, '2026-03-13 14:38:54'),
-(9, 20, 'E08', 'Standard', 350.00, '2026-03-13 14:38:54'),
-(10, 20, 'E09', 'Standard', 350.00, '2026-03-13 14:38:54'),
-(11, 20, 'E10', 'Standard', 350.00, '2026-03-13 14:38:54'),
 (12, 21, 'A01', 'Premium', 450.00, '2026-03-13 15:08:01'),
 (13, 21, 'A02', 'Premium', 450.00, '2026-03-13 15:08:01'),
 (14, 22, 'D08', 'Sweet Spot', 550.00, '2026-03-14 13:12:51'),
@@ -86,7 +81,20 @@ INSERT INTO `booked_seats` (`id`, `booking_id`, `seat_number`, `seat_type`, `pri
 (27, 25, 'A06', 'Premium', 450.00, '2026-03-14 14:02:39'),
 (28, 25, 'A08', 'Premium', 450.00, '2026-03-14 14:02:39'),
 (29, 26, 'A06', 'Premium', 450.00, '2026-03-14 14:05:02'),
-(30, 26, 'A08', 'Premium', 450.00, '2026-03-14 14:05:02');
+(30, 26, 'A08', 'Premium', 450.00, '2026-03-14 14:05:02'),
+(31, 27, 'C09', 'Standard', 350.00, '2026-03-14 14:49:37'),
+(32, 27, 'C10', 'Standard', 350.00, '2026-03-14 14:49:37'),
+(33, 28, 'A09', 'Premium', 450.00, '2026-03-14 16:22:42'),
+(34, 28, 'B10', 'Sweet Spot', 550.00, '2026-03-14 16:22:42'),
+(35, 20, 'E01', 'Standard', 350.00, '2026-03-15 08:14:37'),
+(36, 20, 'E02', 'Standard', 350.00, '2026-03-15 08:14:37'),
+(37, 20, 'E03', 'Standard', 350.00, '2026-03-15 08:14:37'),
+(38, 20, 'E04', 'Standard', 350.00, '2026-03-15 08:14:37'),
+(39, 20, 'E05', 'Standard', 350.00, '2026-03-15 08:14:37'),
+(42, 29, 'B03', 'Standard', 350.00, '2026-04-01 05:14:48'),
+(43, 29, 'B04', 'Standard', 350.00, '2026-04-01 05:14:48'),
+(48, 30, 'A05', 'Premium', 450.00, '2026-04-18 06:31:07'),
+(49, 30, 'A06', 'Premium', 450.00, '2026-04-18 06:31:07');
 
 -- --------------------------------------------------------
 
@@ -97,13 +105,20 @@ INSERT INTO `booked_seats` (`id`, `booking_id`, `seat_number`, `seat_type`, `pri
 CREATE TABLE `customer_activity_log` (
   `id` int(11) NOT NULL,
   `customer_id` int(11) NOT NULL,
-  `action_type` varchar(50) NOT NULL,
+  `action_type` enum('BOOKING','MOVIE_VIEW','LOGIN') NOT NULL,
   `details` text DEFAULT NULL,
   `movie_id` int(11) DEFAULT NULL,
   `schedule_id` int(11) DEFAULT NULL,
   `booking_id` int(11) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `customer_activity_log`
+--
+
+INSERT INTO `customer_activity_log` (`id`, `customer_id`, `action_type`, `details`, `movie_id`, `schedule_id`, `booking_id`, `created_at`) VALUES
+(1, 1, 'LOGIN', 'User logged in: jaylord', NULL, NULL, NULL, '2026-04-18 11:22:01');
 
 -- --------------------------------------------------------
 
@@ -131,8 +146,8 @@ CREATE TABLE `manual_payments` (
 --
 
 INSERT INTO `manual_payments` (`id`, `booking_id`, `user_id`, `payment_method_id`, `reference_number`, `amount`, `screenshot_path`, `status`, `admin_notes`, `verified_by`, `verified_at`, `created_at`) VALUES
-(1, 12, 1, 1, '0912112344', 1350.00, 'uploads/payments/payment_BK2026030812241074_1772972725.png', 'Verified', '', 2, '2026-03-08 12:26:27', '2026-03-08 12:25:25'),
-(2, 20, 1, 1, '0912112344', 1750.00, 'uploads/payments/payment_BK2026031314385476_1773413023.jpg', 'Verified', 'Okay thank you sir', 2, '2026-03-13 15:12:49', '2026-03-13 14:43:43');
+(1, 12, 1, 1, '0912112344', 1350.00, 'uploads/payments/payment_BK2026030812241074_1772972725.png', 'Verified', '', NULL, '2026-03-08 12:26:27', '2026-03-08 12:25:25'),
+(2, 20, 1, 1, '0912112344', 1750.00, 'uploads/payments/payment_BK2026031314385476_1773413023.jpg', 'Verified', 'Okay thank you sir', NULL, '2026-03-13 15:12:49', '2026-03-13 14:43:43');
 
 -- --------------------------------------------------------
 
@@ -168,12 +183,9 @@ CREATE TABLE `movies` (
 --
 
 INSERT INTO `movies` (`id`, `title`, `director`, `genre`, `duration`, `rating`, `description`, `poster_url`, `trailer_url`, `venue_name`, `venue_location`, `google_maps_link`, `standard_price`, `premium_price`, `sweet_spot_price`, `is_active`, `added_by`, `updated_by`, `created_at`, `last_updated`) VALUES
-(1, 'Sinners', NULL, 'Supernatural horror', '2hours', 'PG', 'Sinners (2025) is a supernatural horror-period film directed by Ryan Coogler, set in the 1930s Mississippi Delta. The story follows twin brothers, the Smokestack Twins, who return to their hometown seeking a fresh start after working for the Chicago Mafia. They buy a sawmill and a juke joint, but soon face supernatural troubles that challenge their quest for redemption amidst themes of racism and evil.', 'https://i.pinimg.com/originals/93/b2/ec/93b2ec2431ea0ae34a2dbafc81a1d72e.jpg', 'https://www.youtube.com/watch?v=bKGxHflevuk', 'SM Cinema', 'Purok 13 Cadulawan minglanilla Cebu', 'https://www.google.com/maps/place//@10.2699325,123.7746523,20.83z/data=!4m9!1m8!3m7!1s0x33a977e4598c638d:0xd2016057b1f9cd28!2sMinglanilla,+Cebu!3b1!8m2!3d10.2454293!4d123.7959894!16zL20vMDZoNGhs?entry=ttu&amp;g_ep=EgoyMDI2MDIxOC4wIKXMDSoASAFQAw%3D%3D', 350.00, 450.00, 550.00, 1, 2, NULL, '2026-03-06 15:03:50', NULL),
-(2, 'The Notebook', 'Denise', 'Drama/Romance', '123 minutes', 'PG', 'The Notebook&amp;amp;quot; is a romantic drama that tells the enduring love story of a young couple from different social backgrounds, recounted decades later by an elderly man from a cherished notebook.', 'https://www.themoviedb.org/t/p/original/wbvboxr6xmdSbMEBKzXVWgAwJ1Q.jpg', 'https://www.youtube.com/watch?v=BjJcYdEOI0k', 'SM Cinema', 'Purok 13 Cadulawan minglanilla Cebu', 'https://www.google.com/maps/place//@10.2699325,123.7746523,20.83z/data=!4m9!1m8!3m7!1s0x33a977e4598c638d:0xd2016057b1f9cd28!2sMinglanilla,+Cebu!3b1!8m2!3d10.2454293!4d123.7959894!16zL20vMDZoNGhs?entry=ttu&amp;amp;g_ep=EgoyMDI2MDIxOC4wIKXMDSoASAFQAw%3D%3D', 350.00, 500.00, 550.00, 1, 2, 2, '2026-03-06 15:14:24', '2026-03-07 05:19:04'),
-(3, 'test', NULL, 'test', 'test', 'G', 'test', '', '', 'test', 'test', '', 350.00, 450.00, 550.00, 0, 2, NULL, '2026-03-06 15:48:47', '2026-03-06 15:50:47'),
-(4, 'test', NULL, 'test', 'test', 'G', 'test', '', '', '', '', '', 350.00, 450.00, 550.00, 0, 2, NULL, '2026-03-07 03:09:27', '2026-03-07 03:56:05'),
-(5, 'testt', NULL, 'testt', 'testt', 'G', 'testt', '', '', '', '', '', 350.00, 450.00, 550.00, 0, 2, NULL, '2026-03-07 03:54:12', '2026-03-07 03:56:01'),
-(6, 'testt', NULL, 'testt', 'testt', 'G', 'test', '', '', '', '', '', 350.00, 450.00, 550.00, 1, 2, NULL, '2026-03-07 04:31:42', NULL);
+(1, 'Sinners', '', 'Supernatural horror', '2hours', 'PG', 'Sinners (2025) is a supernatural horror-period film directed by Ryan Coogler, set in the 1930s Mississippi Delta. The story follows twin brothers, the Smokestack Twins, who return to their hometown seeking a fresh start after working for the Chicago Mafia. They buy a sawmill and a juke joint, but soon face supernatural troubles that challenge their quest for redemption amidst themes of racism and evil.', 'https://i.pinimg.com/originals/93/b2/ec/93b2ec2431ea0ae34a2dbafc81a1d72e.jpg', 'https://www.youtube.com/watch?v=bKGxHflevuk', 'SM Cinema', 'Purok 13 Cadulawan minglanilla Cebu', 'https://www.google.com/maps/place//@10.2699325,123.7746523,20.83z/data=!4m9!1m8!3m7!1s0x33a977e4598c638d:0xd2016057b1f9cd28!2sMinglanilla,+Cebu!3b1!8m2!3d10.2454293!4d123.7959894!16zL20vMDZoNGhs?entry=ttu&g_ep=EgoyMDI2MDIxOC4wIKXMDSoASAFQAw%3D%3D', 350.00, 800.00, 5500.00, 1, 2, 2, '2026-03-06 15:03:50', '2026-04-16 13:40:18'),
+(2, 'The Notebook', 'Denise', 'Drama/Romance', '123 minutes', 'PG', 'The Notebook is a romantic drama that tells the enduring love story of a young couple from different social backgrounds, recounted decades later by an elderly man from a cherished notebook.', 'https://www.themoviedb.org/t/p/original/wbvboxr6xmdSbMEBKzXVWgAwJ1Q.jpg', 'https://www.youtube.com/watch?v=BjJcYdEOI0k', 'SM Cinema', 'Purok 13 Cadulawan minglanilla Cebu', 'https://www.google.com/maps/place//@10.2699325,123.7746523,20.83z/data=!4m9!1m8!3m7!1s0x33a977e4598c638d:0xd2016057b1f9cd28!2sMinglanilla,+Cebu!3b1!8m2!3d10.2454293!4d123.7959894!16zL20vMDZoNGhs?entry=ttu&amp;amp;g_ep=EgoyMDI2MDIxOC4wIKXMDSoASAFQAw%3D%3D', 350.00, 500.00, 550.00, 1, 2, 2, '2026-03-06 15:14:24', '2026-04-18 11:19:27'),
+(6, 'jay1', '', 'testt', 'testt', 'G', 'test', '', '', '', '', 'https://www.google.com/maps/@10.2701892,123.7749737,3a,75y,61.31h,78.1t/data=!3m7!1e1!3m5!1ss76j3A-wBBsmXsq_bpiIcA!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fcb_client%3Dmaps_sv.tactile%26w%3D900%26h%3D600%26pitch%3D11.90046187165521%26panoid%3Ds76j3A-wBBsmXsq_bpiIcA%26yaw%3D61.30689665955039!7i16384!8i8192?entry=ttu&g_ep=EgoyMDI2MDQxMy4wIKXMDSoASAFQAw%3D%3D', 350.00, 450.00, 550.00, 1, 2, 2, '2026-03-07 04:31:42', '2026-04-16 13:16:17');
 
 -- --------------------------------------------------------
 
@@ -198,11 +210,10 @@ CREATE TABLE `movie_schedules` (
 --
 
 INSERT INTO `movie_schedules` (`id`, `movie_id`, `movie_title`, `show_date`, `showtime`, `total_seats`, `available_seats`, `is_active`, `created_at`) VALUES
-(1, 1, 'Sinners', '2026-03-31', '13:00:00', 50, 30, 1, '2026-03-06 15:04:42'),
+(1, 1, 'Sinners', '2026-03-31', '13:00:00', 50, 26, 1, '2026-03-06 15:04:42'),
 (2, 2, 'The Notebook', '2026-03-12', '17:00:00', 40, 40, 1, '2026-03-06 15:36:32'),
-(3, 3, 'test', '2026-03-11', '10:00:00', 40, 40, 0, '2026-03-06 15:49:29'),
-(4, 5, 'testt', '2026-03-11', '18:01:00', 40, 40, 1, '2026-03-07 03:09:55'),
-(5, 6, 'testt', '2026-03-14', '18:01:00', 40, 31, 1, '2026-03-13 15:07:34');
+(5, 6, 'testt', '2026-03-14', '18:01:00', 40, 31, 1, '2026-03-13 15:07:34'),
+(6, 1, 'Sinners', '2026-04-24', '10:00:00', 40, 36, 1, '2026-04-01 05:07:51');
 
 -- --------------------------------------------------------
 
@@ -287,7 +298,7 @@ INSERT INTO `seat_availability` (`id`, `schedule_id`, `movie_title`, `show_date`
 (6, 1, 'Sinners', '2026-03-31', '13:00:00', 'A06', 'Premium', 450.00, 0, 26),
 (7, 1, 'Sinners', '2026-03-31', '13:00:00', 'A07', 'Premium', 450.00, 0, 12),
 (8, 1, 'Sinners', '2026-03-31', '13:00:00', 'A08', 'Premium', 450.00, 0, 26),
-(9, 1, 'Sinners', '2026-03-31', '13:00:00', 'A09', 'Premium', 450.00, 1, NULL),
+(9, 1, 'Sinners', '2026-03-31', '13:00:00', 'A09', 'Premium', 450.00, 0, 28),
 (10, 1, 'Sinners', '2026-03-31', '13:00:00', 'A10', 'Premium', 450.00, 0, 12),
 (11, 1, 'Sinners', '2026-03-31', '13:00:00', 'B01', 'Standard', 350.00, 1, NULL),
 (12, 1, 'Sinners', '2026-03-31', '13:00:00', 'B02', 'Standard', 350.00, 1, NULL),
@@ -298,7 +309,7 @@ INSERT INTO `seat_availability` (`id`, `schedule_id`, `movie_title`, `show_date`
 (17, 1, 'Sinners', '2026-03-31', '13:00:00', 'B07', 'Standard', 350.00, 1, NULL),
 (18, 1, 'Sinners', '2026-03-31', '13:00:00', 'B08', 'Standard', 350.00, 1, NULL),
 (19, 1, 'Sinners', '2026-03-31', '13:00:00', 'B09', 'Standard', 350.00, 1, NULL),
-(20, 1, 'Sinners', '2026-03-31', '13:00:00', 'B10', 'Sweet Spot', 550.00, 1, NULL),
+(20, 1, 'Sinners', '2026-03-31', '13:00:00', 'B10', 'Sweet Spot', 550.00, 0, 28),
 (21, 1, 'Sinners', '2026-03-31', '13:00:00', 'C01', 'Standard', 350.00, 0, 17),
 (22, 1, 'Sinners', '2026-03-31', '13:00:00', 'C02', 'Standard', 350.00, 0, 17),
 (23, 1, 'Sinners', '2026-03-31', '13:00:00', 'C03', 'Standard', 350.00, 0, 17),
@@ -307,8 +318,8 @@ INSERT INTO `seat_availability` (`id`, `schedule_id`, `movie_title`, `show_date`
 (26, 1, 'Sinners', '2026-03-31', '13:00:00', 'C06', 'Standard', 350.00, 1, NULL),
 (27, 1, 'Sinners', '2026-03-31', '13:00:00', 'C07', 'Standard', 350.00, 1, NULL),
 (28, 1, 'Sinners', '2026-03-31', '13:00:00', 'C08', 'Standard', 350.00, 1, NULL),
-(29, 1, 'Sinners', '2026-03-31', '13:00:00', 'C09', 'Standard', 350.00, 1, NULL),
-(30, 1, 'Sinners', '2026-03-31', '13:00:00', 'C10', 'Standard', 350.00, 1, NULL),
+(29, 1, 'Sinners', '2026-03-31', '13:00:00', 'C09', 'Standard', 350.00, 0, 27),
+(30, 1, 'Sinners', '2026-03-31', '13:00:00', 'C10', 'Standard', 350.00, 0, 27),
 (31, 1, 'Sinners', '2026-03-31', '13:00:00', 'D01', 'Sweet Spot', 550.00, 1, NULL),
 (32, 1, 'Sinners', '2026-03-31', '13:00:00', 'D02', 'Sweet Spot', 550.00, 1, NULL),
 (33, 1, 'Sinners', '2026-03-31', '13:00:00', 'D03', 'Sweet Spot', 550.00, 1, NULL),
@@ -359,91 +370,11 @@ INSERT INTO `seat_availability` (`id`, `schedule_id`, `movie_title`, `show_date`
 (78, 2, 'The Notebook', '2026-03-12', '17:00:00', 'D08', 'Sweet Spot', 550.00, 1, NULL),
 (79, 2, 'The Notebook', '2026-03-12', '17:00:00', 'D09', 'Sweet Spot', 550.00, 1, NULL),
 (80, 2, 'The Notebook', '2026-03-12', '17:00:00', 'D10', 'Sweet Spot', 550.00, 1, NULL),
-(81, 3, 'test', '2026-03-11', '10:00:00', 'A01', 'Premium', 450.00, 1, NULL),
-(82, 3, 'test', '2026-03-11', '10:00:00', 'A02', 'Premium', 450.00, 1, NULL),
-(83, 3, 'test', '2026-03-11', '10:00:00', 'A03', 'Premium', 450.00, 1, NULL),
-(84, 3, 'test', '2026-03-11', '10:00:00', 'A04', 'Premium', 450.00, 1, NULL),
-(85, 3, 'test', '2026-03-11', '10:00:00', 'A05', 'Premium', 450.00, 1, NULL),
-(86, 3, 'test', '2026-03-11', '10:00:00', 'A06', 'Premium', 450.00, 1, NULL),
-(87, 3, 'test', '2026-03-11', '10:00:00', 'A07', 'Premium', 450.00, 1, NULL),
-(88, 3, 'test', '2026-03-11', '10:00:00', 'A08', 'Premium', 450.00, 1, NULL),
-(89, 3, 'test', '2026-03-11', '10:00:00', 'A09', 'Premium', 450.00, 1, NULL),
-(90, 3, 'test', '2026-03-11', '10:00:00', 'A10', 'Premium', 450.00, 1, NULL),
-(91, 3, 'test', '2026-03-11', '10:00:00', 'B01', 'Standard', 350.00, 1, NULL),
-(92, 3, 'test', '2026-03-11', '10:00:00', 'B02', 'Standard', 350.00, 1, NULL),
-(93, 3, 'test', '2026-03-11', '10:00:00', 'B03', 'Standard', 350.00, 1, NULL),
-(94, 3, 'test', '2026-03-11', '10:00:00', 'B04', 'Standard', 350.00, 1, NULL),
-(95, 3, 'test', '2026-03-11', '10:00:00', 'B05', 'Standard', 350.00, 1, NULL),
-(96, 3, 'test', '2026-03-11', '10:00:00', 'B06', 'Standard', 350.00, 1, NULL),
-(97, 3, 'test', '2026-03-11', '10:00:00', 'B07', 'Standard', 350.00, 1, NULL),
-(98, 3, 'test', '2026-03-11', '10:00:00', 'B08', 'Standard', 350.00, 1, NULL),
-(99, 3, 'test', '2026-03-11', '10:00:00', 'B09', 'Standard', 350.00, 1, NULL),
-(100, 3, 'test', '2026-03-11', '10:00:00', 'B10', 'Standard', 350.00, 1, NULL),
-(101, 3, 'test', '2026-03-11', '10:00:00', 'C01', 'Standard', 350.00, 1, NULL),
-(102, 3, 'test', '2026-03-11', '10:00:00', 'C02', 'Standard', 350.00, 1, NULL),
-(103, 3, 'test', '2026-03-11', '10:00:00', 'C03', 'Standard', 350.00, 1, NULL),
-(104, 3, 'test', '2026-03-11', '10:00:00', 'C04', 'Standard', 350.00, 1, NULL),
-(105, 3, 'test', '2026-03-11', '10:00:00', 'C05', 'Standard', 350.00, 1, NULL),
-(106, 3, 'test', '2026-03-11', '10:00:00', 'C06', 'Standard', 350.00, 1, NULL),
-(107, 3, 'test', '2026-03-11', '10:00:00', 'C07', 'Standard', 350.00, 1, NULL),
-(108, 3, 'test', '2026-03-11', '10:00:00', 'C08', 'Standard', 350.00, 1, NULL),
-(109, 3, 'test', '2026-03-11', '10:00:00', 'C09', 'Standard', 350.00, 1, NULL),
-(110, 3, 'test', '2026-03-11', '10:00:00', 'C10', 'Standard', 350.00, 1, NULL),
-(111, 3, 'test', '2026-03-11', '10:00:00', 'D01', 'Sweet Spot', 550.00, 1, NULL),
-(112, 3, 'test', '2026-03-11', '10:00:00', 'D02', 'Sweet Spot', 550.00, 1, NULL),
-(113, 3, 'test', '2026-03-11', '10:00:00', 'D03', 'Sweet Spot', 550.00, 1, NULL),
-(114, 3, 'test', '2026-03-11', '10:00:00', 'D04', 'Sweet Spot', 550.00, 1, NULL),
-(115, 3, 'test', '2026-03-11', '10:00:00', 'D05', 'Sweet Spot', 550.00, 1, NULL),
-(116, 3, 'test', '2026-03-11', '10:00:00', 'D06', 'Sweet Spot', 550.00, 1, NULL),
-(117, 3, 'test', '2026-03-11', '10:00:00', 'D07', 'Sweet Spot', 550.00, 1, NULL),
-(118, 3, 'test', '2026-03-11', '10:00:00', 'D08', 'Sweet Spot', 550.00, 1, NULL),
-(119, 3, 'test', '2026-03-11', '10:00:00', 'D09', 'Sweet Spot', 550.00, 1, NULL),
-(120, 3, 'test', '2026-03-11', '10:00:00', 'D10', 'Sweet Spot', 550.00, 1, NULL),
-(121, 4, 'testt', '2026-03-11', '18:01:00', 'A01', 'Premium', 450.00, 1, NULL),
-(122, 4, 'testt', '2026-03-11', '18:01:00', 'A02', 'Premium', 450.00, 1, NULL),
-(123, 4, 'testt', '2026-03-11', '18:01:00', 'A03', 'Premium', 450.00, 1, NULL),
-(124, 4, 'testt', '2026-03-11', '18:01:00', 'A04', 'Premium', 450.00, 1, NULL),
-(125, 4, 'testt', '2026-03-11', '18:01:00', 'A05', 'Premium', 450.00, 1, NULL),
-(126, 4, 'testt', '2026-03-11', '18:01:00', 'A06', 'Premium', 450.00, 1, NULL),
-(127, 4, 'testt', '2026-03-11', '18:01:00', 'A07', 'Premium', 450.00, 1, NULL),
-(128, 4, 'testt', '2026-03-11', '18:01:00', 'A08', 'Premium', 450.00, 1, NULL),
-(129, 4, 'testt', '2026-03-11', '18:01:00', 'A09', 'Premium', 450.00, 1, NULL),
-(130, 4, 'testt', '2026-03-11', '18:01:00', 'A10', 'Premium', 450.00, 1, NULL),
-(131, 4, 'testt', '2026-03-11', '18:01:00', 'B01', 'Standard', 350.00, 1, NULL),
-(132, 4, 'testt', '2026-03-11', '18:01:00', 'B02', 'Standard', 350.00, 1, NULL),
-(133, 4, 'testt', '2026-03-11', '18:01:00', 'B03', 'Standard', 350.00, 1, NULL),
-(134, 4, 'testt', '2026-03-11', '18:01:00', 'B04', 'Standard', 350.00, 1, NULL),
-(135, 4, 'testt', '2026-03-11', '18:01:00', 'B05', 'Standard', 350.00, 1, NULL),
-(136, 4, 'testt', '2026-03-11', '18:01:00', 'B06', 'Standard', 350.00, 1, NULL),
-(137, 4, 'testt', '2026-03-11', '18:01:00', 'B07', 'Standard', 350.00, 1, NULL),
-(138, 4, 'testt', '2026-03-11', '18:01:00', 'B08', 'Standard', 350.00, 1, NULL),
-(139, 4, 'testt', '2026-03-11', '18:01:00', 'B09', 'Standard', 350.00, 1, NULL),
-(140, 4, 'testt', '2026-03-11', '18:01:00', 'B10', 'Standard', 350.00, 1, NULL),
-(141, 4, 'testt', '2026-03-11', '18:01:00', 'C01', 'Standard', 350.00, 1, NULL),
-(142, 4, 'testt', '2026-03-11', '18:01:00', 'C02', 'Standard', 350.00, 1, NULL),
-(143, 4, 'testt', '2026-03-11', '18:01:00', 'C03', 'Standard', 350.00, 1, NULL),
-(144, 4, 'testt', '2026-03-11', '18:01:00', 'C04', 'Standard', 350.00, 1, NULL),
-(145, 4, 'testt', '2026-03-11', '18:01:00', 'C05', 'Standard', 350.00, 1, NULL),
-(146, 4, 'testt', '2026-03-11', '18:01:00', 'C06', 'Standard', 350.00, 1, NULL),
-(147, 4, 'testt', '2026-03-11', '18:01:00', 'C07', 'Standard', 350.00, 1, NULL),
-(148, 4, 'testt', '2026-03-11', '18:01:00', 'C08', 'Standard', 350.00, 1, NULL),
-(149, 4, 'testt', '2026-03-11', '18:01:00', 'C09', 'Standard', 350.00, 1, NULL),
-(150, 4, 'testt', '2026-03-11', '18:01:00', 'C10', 'Standard', 350.00, 1, NULL),
-(151, 4, 'testt', '2026-03-11', '18:01:00', 'D01', 'Sweet Spot', 550.00, 1, NULL),
-(152, 4, 'testt', '2026-03-11', '18:01:00', 'D02', 'Sweet Spot', 550.00, 1, NULL),
-(153, 4, 'testt', '2026-03-11', '18:01:00', 'D03', 'Sweet Spot', 550.00, 1, NULL),
-(154, 4, 'testt', '2026-03-11', '18:01:00', 'D04', 'Sweet Spot', 550.00, 1, NULL),
-(155, 4, 'testt', '2026-03-11', '18:01:00', 'D05', 'Sweet Spot', 550.00, 1, NULL),
-(156, 4, 'testt', '2026-03-11', '18:01:00', 'D06', 'Sweet Spot', 550.00, 1, NULL),
-(157, 4, 'testt', '2026-03-11', '18:01:00', 'D07', 'Sweet Spot', 550.00, 1, NULL),
-(158, 4, 'testt', '2026-03-11', '18:01:00', 'D08', 'Sweet Spot', 550.00, 1, NULL),
-(159, 4, 'testt', '2026-03-11', '18:01:00', 'D09', 'Sweet Spot', 550.00, 1, NULL),
-(160, 4, 'testt', '2026-03-11', '18:01:00', 'D10', 'Sweet Spot', 550.00, 1, NULL),
-(181, 1, 'Sinners', '2026-03-31', '13:00:00', 'E01', 'Standard', 350.00, 1, NULL),
-(182, 1, 'Sinners', '2026-03-31', '13:00:00', 'E02', 'Standard', 350.00, 1, NULL),
-(183, 1, 'Sinners', '2026-03-31', '13:00:00', 'E03', 'Standard', 350.00, 1, NULL),
-(184, 1, 'Sinners', '2026-03-31', '13:00:00', 'E04', 'Standard', 350.00, 1, NULL),
-(185, 1, 'Sinners', '2026-03-31', '13:00:00', 'E05', 'Standard', 350.00, 1, NULL),
+(181, 1, 'Sinners', '2026-03-31', '13:00:00', 'E01', 'Standard', 350.00, 0, 20),
+(182, 1, 'Sinners', '2026-03-31', '13:00:00', 'E02', 'Standard', 350.00, 0, 20),
+(183, 1, 'Sinners', '2026-03-31', '13:00:00', 'E03', 'Standard', 350.00, 0, 20),
+(184, 1, 'Sinners', '2026-03-31', '13:00:00', 'E04', 'Standard', 350.00, 0, 20),
+(185, 1, 'Sinners', '2026-03-31', '13:00:00', 'E05', 'Standard', 350.00, 0, 20),
 (186, 1, 'Sinners', '2026-03-31', '13:00:00', 'E06', 'Standard', 350.00, 0, 20),
 (187, 1, 'Sinners', '2026-03-31', '13:00:00', 'E07', 'Standard', 350.00, 0, 20),
 (188, 1, 'Sinners', '2026-03-31', '13:00:00', 'E08', 'Standard', 350.00, 0, 20),
@@ -488,7 +419,47 @@ INSERT INTO `seat_availability` (`id`, `schedule_id`, `movie_title`, `show_date`
 (237, 5, 'testt', '2026-03-14', '18:01:00', 'D07', 'Sweet Spot', 550.00, 1, NULL),
 (238, 5, 'testt', '2026-03-14', '18:01:00', 'D08', 'Sweet Spot', 550.00, 0, 22),
 (239, 5, 'testt', '2026-03-14', '18:01:00', 'D09', 'Sweet Spot', 550.00, 0, 22),
-(240, 5, 'testt', '2026-03-14', '18:01:00', 'D10', 'Sweet Spot', 550.00, 0, 22);
+(240, 5, 'testt', '2026-03-14', '18:01:00', 'D10', 'Sweet Spot', 550.00, 0, 22),
+(241, 6, 'Sinners', '2026-04-11', '10:00:00', 'A01', 'Premium', 450.00, 1, NULL),
+(242, 6, 'Sinners', '2026-04-11', '10:00:00', 'A02', 'Premium', 450.00, 1, NULL),
+(243, 6, 'Sinners', '2026-04-11', '10:00:00', 'A03', 'Premium', 450.00, 1, NULL),
+(244, 6, 'Sinners', '2026-04-11', '10:00:00', 'A04', 'Premium', 450.00, 1, NULL),
+(245, 6, 'Sinners', '2026-04-11', '10:00:00', 'A05', 'Premium', 450.00, 0, 30),
+(246, 6, 'Sinners', '2026-04-11', '10:00:00', 'A06', 'Premium', 450.00, 0, 30),
+(247, 6, 'Sinners', '2026-04-11', '10:00:00', 'A07', 'Premium', 450.00, 1, NULL),
+(248, 6, 'Sinners', '2026-04-11', '10:00:00', 'A08', 'Premium', 450.00, 1, NULL),
+(249, 6, 'Sinners', '2026-04-11', '10:00:00', 'A09', 'Premium', 450.00, 1, NULL),
+(250, 6, 'Sinners', '2026-04-11', '10:00:00', 'A10', 'Premium', 450.00, 1, NULL),
+(251, 6, 'Sinners', '2026-04-11', '10:00:00', 'B01', 'Standard', 350.00, 1, NULL),
+(252, 6, 'Sinners', '2026-04-11', '10:00:00', 'B02', 'Standard', 350.00, 1, NULL),
+(253, 6, 'Sinners', '2026-04-11', '10:00:00', 'B03', 'Standard', 350.00, 0, 29),
+(254, 6, 'Sinners', '2026-04-11', '10:00:00', 'B04', 'Standard', 350.00, 0, 29),
+(255, 6, 'Sinners', '2026-04-11', '10:00:00', 'B05', 'Standard', 350.00, 1, NULL),
+(256, 6, 'Sinners', '2026-04-11', '10:00:00', 'B06', 'Standard', 350.00, 1, NULL),
+(257, 6, 'Sinners', '2026-04-11', '10:00:00', 'B07', 'Standard', 350.00, 1, NULL),
+(258, 6, 'Sinners', '2026-04-11', '10:00:00', 'B08', 'Standard', 350.00, 1, NULL),
+(259, 6, 'Sinners', '2026-04-11', '10:00:00', 'B09', 'Standard', 350.00, 1, NULL),
+(260, 6, 'Sinners', '2026-04-11', '10:00:00', 'B10', 'Standard', 350.00, 1, NULL),
+(261, 6, 'Sinners', '2026-04-11', '10:00:00', 'C01', 'Standard', 350.00, 1, NULL),
+(262, 6, 'Sinners', '2026-04-11', '10:00:00', 'C02', 'Standard', 350.00, 1, NULL),
+(263, 6, 'Sinners', '2026-04-11', '10:00:00', 'C03', 'Standard', 350.00, 1, NULL),
+(264, 6, 'Sinners', '2026-04-11', '10:00:00', 'C04', 'Standard', 350.00, 1, NULL),
+(265, 6, 'Sinners', '2026-04-11', '10:00:00', 'C05', 'Standard', 350.00, 1, NULL),
+(266, 6, 'Sinners', '2026-04-11', '10:00:00', 'C06', 'Standard', 350.00, 1, NULL),
+(267, 6, 'Sinners', '2026-04-11', '10:00:00', 'C07', 'Standard', 350.00, 1, NULL),
+(268, 6, 'Sinners', '2026-04-11', '10:00:00', 'C08', 'Standard', 350.00, 1, NULL),
+(269, 6, 'Sinners', '2026-04-11', '10:00:00', 'C09', 'Standard', 350.00, 1, NULL),
+(270, 6, 'Sinners', '2026-04-11', '10:00:00', 'C10', 'Standard', 350.00, 1, NULL),
+(271, 6, 'Sinners', '2026-04-11', '10:00:00', 'D01', 'Sweet Spot', 5500.00, 1, NULL),
+(272, 6, 'Sinners', '2026-04-11', '10:00:00', 'D02', 'Sweet Spot', 5500.00, 1, NULL),
+(273, 6, 'Sinners', '2026-04-11', '10:00:00', 'D03', 'Sweet Spot', 5500.00, 1, NULL),
+(274, 6, 'Sinners', '2026-04-11', '10:00:00', 'D04', 'Sweet Spot', 5500.00, 1, NULL),
+(275, 6, 'Sinners', '2026-04-11', '10:00:00', 'D05', 'Sweet Spot', 5500.00, 1, NULL),
+(276, 6, 'Sinners', '2026-04-11', '10:00:00', 'D06', 'Sweet Spot', 5500.00, 1, NULL),
+(277, 6, 'Sinners', '2026-04-11', '10:00:00', 'D07', 'Sweet Spot', 5500.00, 1, NULL),
+(278, 6, 'Sinners', '2026-04-11', '10:00:00', 'D08', 'Sweet Spot', 5500.00, 1, NULL),
+(279, 6, 'Sinners', '2026-04-11', '10:00:00', 'D09', 'Sweet Spot', 5500.00, 1, NULL),
+(280, 6, 'Sinners', '2026-04-11', '10:00:00', 'D10', 'Sweet Spot', 5500.00, 1, NULL);
 
 -- --------------------------------------------------------
 
@@ -544,13 +515,17 @@ INSERT INTO `tbl_booking` (`b_id`, `u_id`, `movie_name`, `show_date`, `showtime`
 (17, 1, 'Sinners', '2026-03-31', '13:00:00', 1050.00, 'Cancelled', '2026-03-13 13:34:21', 'Refunded', 0, 'BK2026031313342189'),
 (18, 1, 'Sinners', '2026-03-31', '13:00:00', 1400.00, 'Cancelled', '2026-03-13 14:05:12', 'Refunded', 0, 'BK2026031314051248'),
 (19, 1, 'Sinners', '2026-03-31', '13:00:00', 700.00, 'Cancelled', '2026-03-13 14:23:15', 'Refunded', 1, 'BK2026031314231504'),
-(20, 1, 'Sinners', '2026-03-31', '13:00:00', 1750.00, 'Ongoing', '2026-03-13 14:38:54', 'Paid', 1, 'BK2026031314385476'),
+(20, 1, 'Sinners', '2026-03-31', '13:00:00', 1750.00, 'Done', '2026-03-13 14:38:54', 'Paid', 1, 'BK2026031314385476'),
 (21, 1, 'testt', '2026-03-14', '18:01:00', 900.00, 'Cancelled', '2026-03-13 15:08:01', 'Refunded', 0, 'BK2026031315080111'),
 (22, 1, 'testt', '2026-03-14', '18:01:00', 1650.00, 'Done', '2026-03-14 13:12:51', 'Pending', 0, 'BK2026031413125188'),
 (23, 1, 'testt', '2026-03-14', '18:01:00', 2100.00, 'Done', '2026-03-14 13:14:11', 'Pending', 1, 'BK2026031413141123'),
 (24, 1, 'Sinners', '2026-03-31', '13:00:00', 1400.00, 'Cancelled', '2026-03-14 13:35:55', 'Refunded', 1, 'BK2026031413355584'),
 (25, 1, 'Sinners', '2026-03-31', '13:00:00', 900.00, 'Cancelled', '2026-03-14 14:02:39', 'Refunded', 1, 'BK2026031414023992'),
-(26, 1, 'Sinners', '2026-03-31', '13:00:00', 900.00, 'Ongoing', '2026-03-14 14:05:02', 'Pending', 1, 'BK2026031414050246');
+(26, 1, 'Sinners', '2026-03-31', '13:00:00', 900.00, 'Done', '2026-03-14 14:05:02', 'Paid', 1, 'BK2026031414050246'),
+(27, 1, 'Sinners', '2026-03-31', '13:00:00', 700.00, 'Done', '2026-03-14 14:49:37', 'Paid', 1, 'BK2026031414493770'),
+(28, 1, 'Sinners', '2026-03-31', '13:00:00', 1000.00, 'Done', '2026-03-14 16:22:42', 'Paid', 1, 'BK2026031416224214'),
+(29, 1, 'Sinners', '2026-04-11', '10:00:00', 700.00, 'Done', '2026-04-01 05:09:41', 'Paid', 1, 'BK2026040105094144'),
+(30, 1, 'Sinners', '2026-04-24', '10:00:00', 900.00, 'Ongoing', '2026-04-18 06:24:29', 'Paid', 1, 'BK2026041806242941');
 
 -- --------------------------------------------------------
 
@@ -564,21 +539,25 @@ CREATE TABLE `users` (
   `u_username` varchar(50) NOT NULL,
   `u_email` varchar(100) NOT NULL,
   `u_pass` varchar(255) NOT NULL,
-  `u_role` enum('Admin','Customer') DEFAULT 'Customer',
+  `u_role` enum('Admin','Customer','Owner') DEFAULT 'Customer',
   `u_status` enum('Active','Inactive') DEFAULT 'Active',
+  `is_visible` tinyint(1) DEFAULT 1,
   `created_by` int(11) DEFAULT NULL,
   `created_by_name` varchar(100) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_login` timestamp NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `users`
 --
 
-INSERT INTO `users` (`u_id`, `u_name`, `u_username`, `u_email`, `u_pass`, `u_role`, `u_status`, `created_by`, `created_by_name`, `created_at`) VALUES
-(1, 'jaylord', 'jaylord', 'jaylord@gmail.com', '$2y$10$9Z2H5XmtJWLLYtc5mQaMYu1fUAEnKWMeBuDNl9MyyI3lByZrjh99O', 'Customer', 'Active', NULL, NULL, '2026-03-06 14:55:55'),
-(2, 'denise', 'denise', 'denise@gmail.com', '$2y$10$tfaB1ojxrQ2bOdWMH9MveOVBtuyeK8Eo7XPGvSuHRzvngWEg2Ar6y', 'Admin', 'Active', NULL, NULL, '2026-03-06 14:56:22'),
-(3, 'kenz', 'kenz', 'kenz@gmail.com', '$2y$10$svqh5E6JWT1ExKcMENWMIeEIQ3hTyGFi6Sr23J1SF9em8i8FYUVrS', 'Customer', 'Active', NULL, NULL, '2026-03-06 15:16:25');
+INSERT INTO `users` (`u_id`, `u_name`, `u_username`, `u_email`, `u_pass`, `u_role`, `u_status`, `is_visible`, `created_by`, `created_by_name`, `created_at`, `last_login`) VALUES
+(1, 'jaylord', 'jaylord', 'jaylord@gmail.com', '$2y$10$9Z2H5XmtJWLLYtc5mQaMYu1fUAEnKWMeBuDNl9MyyI3lByZrjh99O', 'Customer', 'Active', 1, NULL, NULL, '2026-03-06 14:55:55', '2026-04-18 11:22:01'),
+(3, 'kenz', 'kenz', 'kenz@gmail.com', '$2y$10$svqh5E6JWT1ExKcMENWMIeEIQ3hTyGFi6Sr23J1SF9em8i8FYUVrS', 'Customer', 'Active', 1, NULL, NULL, '2026-03-06 15:16:25', NULL),
+(4, 'test', 'test', 'test@gmail.com', '$2y$10$DFVjJg47KnHQncqSGBpKU.0ealBTYUP6w8xLm8c57zZ1secAbNqp.', 'Customer', 'Active', 1, NULL, 'denise', '2026-04-16 13:35:17', NULL),
+(7, 'Denise Kethley Cana', 'denise', 'jaylordlaspuna1@gmail.com', '$2y$10$ddfQJoomyC8IwTQZxR6/IuvhByLjHZYSzBkAAvSaPJ/nzuGonTI.W', 'Owner', 'Active', 1, NULL, NULL, '2026-04-18 10:39:32', '2026-04-18 10:49:21'),
+(8, 'jurist', 'jurist', 'jurist@gmail.com', '$2y$10$KbXO5FiiV3lpeHoSwYea3.Vn/Hqjwrx/jtLPe0I9wc573cn4puCu2', 'Admin', 'Active', 1, NULL, NULL, '2026-04-18 10:50:08', '2026-04-18 10:59:17');
 
 --
 -- Indexes for dumped tables
@@ -684,19 +663,19 @@ ALTER TABLE `users`
 -- AUTO_INCREMENT for table `admin_activity_log`
 --
 ALTER TABLE `admin_activity_log`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT for table `booked_seats`
 --
 ALTER TABLE `booked_seats`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=31;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=50;
 
 --
 -- AUTO_INCREMENT for table `customer_activity_log`
 --
 ALTER TABLE `customer_activity_log`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT for table `manual_payments`
@@ -714,7 +693,7 @@ ALTER TABLE `movies`
 -- AUTO_INCREMENT for table `movie_schedules`
 --
 ALTER TABLE `movie_schedules`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 
 --
 -- AUTO_INCREMENT for table `payment_methods`
@@ -732,7 +711,7 @@ ALTER TABLE `paymongo_payments`
 -- AUTO_INCREMENT for table `seat_availability`
 --
 ALTER TABLE `seat_availability`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=241;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=281;
 
 --
 -- AUTO_INCREMENT for table `suggestions`
@@ -744,13 +723,13 @@ ALTER TABLE `suggestions`
 -- AUTO_INCREMENT for table `tbl_booking`
 --
 ALTER TABLE `tbl_booking`
-  MODIFY `b_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=27;
+  MODIFY `b_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=31;
 
 --
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `u_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `u_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
 
 --
 -- Constraints for dumped tables

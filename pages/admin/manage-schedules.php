@@ -280,14 +280,7 @@ elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     }
 }
 
-$movies_result = $conn->query("SELECT id, title, standard_price, premium_price, sweet_spot_price FROM movies WHERE is_active = 1 ORDER BY title");
-$movies = [];
-if ($movies_result) {
-    while ($row = $movies_result->fetch_assoc()) {
-        $movies[] = $row;
-    }
-}
-
+// MODIFIED: Only fetch movies that have schedules, ordered by ID DESC (highest first)
 $schedules_result = $conn->query("
     SELECT s.*, m.title as movie_title_full, m.standard_price, m.premium_price, m.sweet_spot_price,
            (SELECT COUNT(*) FROM tbl_booking b 
@@ -298,7 +291,7 @@ $schedules_result = $conn->query("
     FROM movie_schedules s
     LEFT JOIN movies m ON s.movie_id = m.id
     WHERE s.is_active = 1 
-    ORDER BY s.show_date DESC, s.showtime
+    ORDER BY s.id DESC
 ");
 
 $schedules = [];

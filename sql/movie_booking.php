@@ -8,11 +8,13 @@ CREATE TABLE IF NOT EXISTS users (
     u_username VARCHAR(50) UNIQUE NOT NULL,
     u_email VARCHAR(100) UNIQUE NOT NULL,
     u_pass VARCHAR(255) NOT NULL,
-    u_role ENUM('Admin', 'Customer') DEFAULT 'Customer',
+    u_role ENUM('Admin', 'Customer', 'Owner') DEFAULT 'Customer',  
     u_status ENUM('Active', 'Inactive') DEFAULT 'Active',
     created_by INT NULL,
     created_by_name VARCHAR(100) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP NULL DEFAULT NULL,
+    is_visible TINYINT(1) DEFAULT 1,
     FOREIGN KEY (created_by) REFERENCES users(u_id) ON DELETE SET NULL
 );
 

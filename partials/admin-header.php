@@ -3,7 +3,7 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'Admin') {
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role']) || ($_SESSION['user_role'] !== 'Admin' && $_SESSION['user_role'] !== 'Owner')) {
     header("Location: " . SITE_URL . "index.php?page=login");
     exit();
 }
@@ -150,8 +150,11 @@ if (!defined('SITE_URL')) {
             font-size: 0.75rem;
             font-weight: 700;
             text-transform: uppercase;
-            background: linear-gradient(135deg, #ffd700 0%, #ffaa00 100%);
-            color: #333;
+            background: linear-gradient(135deg, var(--admin-accent) 0%, #2980b9 100%);
+            color: white;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
         }
         
         .admin-btn {
@@ -296,8 +299,11 @@ if (!defined('SITE_URL')) {
             
             <div class="admin-user-info">
                 <span class="admin-user-name"><?php echo $_SESSION['user_name']; ?></span>
-                <span class="admin-role-badge">
-                    <?php echo $_SESSION['user_role']; ?>
+                <span class="admin-role-badge" style="<?php echo (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'Owner') ? 'background: linear-gradient(135deg, #ffd700 0%, #ffaa00 100%); color: #333;' : ''; ?>">
+                    <?php echo $_SESSION['user_role'] ?? 'Admin'; ?>
+                    <?php if (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'Owner'): ?>
+                    <i class="fas fa-crown" style="margin-left: 5px;"></i>
+                    <?php endif; ?>
                 </span>
                 <a href="<?php echo SITE_URL; ?>index.php?page=logout" class="admin-btn admin-btn-danger">
                     <i class="fas fa-sign-out-alt"></i> Logout

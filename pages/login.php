@@ -3,6 +3,21 @@ $root_dir = dirname(__DIR__);
 require_once $root_dir . '/includes/config.php';
 require_once $root_dir . '/includes/functions.php';
 
+// Function to log customer login activity
+function log_customer_login($conn, $user_id, $user_name) {
+    $stmt = $conn->prepare("INSERT INTO customer_activity_log (customer_id, action_type, details) VALUES (?, 'LOGIN', ?)");
+    $details = "User logged in: " . $user_name;
+    $stmt->bind_param("is", $user_id, $details);
+    $stmt->execute();
+    $stmt->close();
+    
+    // Update last_login timestamp
+    $update_stmt = $conn->prepare("UPDATE users SET last_login = NOW() WHERE u_id = ?");
+    $update_stmt->bind_param("i", $user_id);
+    $update_stmt->execute();
+    $update_stmt->close();
+}
+
 $error = '';
 $success = '';
 
@@ -12,7 +27,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     $conn = get_db_connection();
     
-    $stmt = $conn->prepare("SELECT u_id, u_name, u_username, u_email, u_pass, u_role, u_status FROM users WHERE u_email = ? OR u_username = ?");
+    // The query will now find Owner accounts as well
+    $stmt = $conn->prepare("SELECT u_id, u_name, u_username, u_email, u_pass, u_role, u_status FROM users WHERE (u_email = ? OR u_username = ?) AND u_status = 'Active'");
     $stmt->bind_param("ss", $login, $login);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -21,22 +37,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $user = $result->fetch_assoc();
         
         if (password_verify($password, $user['u_pass'])) {
-            if ($user['u_status'] === 'Active') {
-                $_SESSION['user_id'] = $user['u_id'];
-                $_SESSION['user_name'] = $user['u_name'];
-                $_SESSION['user_username'] = $user['u_username'];
-                $_SESSION['user_email'] = $user['u_email'];
-                $_SESSION['user_role'] = $user['u_role'];
-                
-                if ($user['u_role'] === 'Admin') {
-                    header("Location: " . SITE_URL . "index.php?page=admin/dashboard");
-                    exit();
-                } else {
-                    header("Location: " . SITE_URL . "index.php?page=home");
-                    exit();
-                }
+            // Account is active and password is correct
+            $_SESSION['user_id'] = $user['u_id'];
+            $_SESSION['user_name'] = $user['u_name'];
+            $_SESSION['user_username'] = $user['u_username'];
+            $_SESSION['user_email'] = $user['u_email'];
+            $_SESSION['user_role'] = $user['u_role'];
+            
+            // Log login activity based on role
+            if ($user['u_role'] === 'Customer') {
+                log_customer_login($conn, $user['u_id'], $user['u_name']);
             } else {
-                $error = "Your account is inactive. Please contact administrator.";
+                // For admins and owners, just update last_login
+                $update_stmt = $conn->prepare("UPDATE users SET last_login = NOW() WHERE u_id = ?");
+                $update_stmt->bind_param("i", $user['u_id']);
+                $update_stmt->execute();
+                $update_stmt->close();
+            }
+            
+            // Redirect based on role - Owner and Admin both go to admin dashboard
+            if ($user['u_role'] === 'Admin' || $user['u_role'] === 'Owner') {
+                header("Location: " . SITE_URL . "index.php?page=admin/dashboard");
+                exit();
+            } else {
+                header("Location: " . SITE_URL . "index.php?page=home");
+                exit();
             }
         } else {
             $error = "Invalid username/email or password!";
