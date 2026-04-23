@@ -51,11 +51,12 @@ if ($filter === 'now-showing') {
     $display_message = "Browse our complete collection of movies";
 }
 
-// Get all unique genres from displayed movies
+// Get all unique genres from displayed movies - FIXED to handle special characters properly
 $allGenres = [];
 foreach ($movies as $movie) {
     if ($movie['genre']) {
-        $genres = explode(',', $movie['genre']);
+        // Split by comma and trim each genre
+        $genres = array_map('trim', explode(',', $movie['genre']));
         foreach ($genres as $genre) {
             $genre = trim($genre);
             if ($genre && !in_array($genre, $allGenres)) {
@@ -66,10 +67,13 @@ foreach ($movies as $movie) {
 }
 sort($allGenres);
 
-// Get filter parameters
+// Get filter parameters - FIXED to properly decode URL parameters
 $searchTerm = isset($_GET['search']) ? sanitize_input($_GET['search']) : '';
-$selectedGenre = isset($_GET['genre']) ? sanitize_input($_GET['genre']) : '';
+$selectedGenreRaw = isset($_GET['genre']) ? $_GET['genre'] : '';
 $selectedRating = isset($_GET['rating']) ? sanitize_input($_GET['rating']) : '';
+
+// FIXED: Properly decode the genre parameter (handles %2F for slashes, %20 for spaces, etc.)
+$selectedGenre = urldecode($selectedGenreRaw);
 
 // Filter movies
 $filteredMovies = $movies;
@@ -81,11 +85,21 @@ if (!empty($searchTerm)) {
     });
 }
 
+// FIXED: Genre filtering - properly handle exact matches including special characters
 if (!empty($selectedGenre) && $selectedGenre !== 'all') {
     $filteredMovies = array_filter($filteredMovies, function($movie) use ($selectedGenre) {
         if (empty($movie['genre'])) return false;
-        $genres = array_map('trim', explode(',', $movie['genre']));
-        return in_array($selectedGenre, $genres);
+        
+        // Split genres by comma and trim each one
+        $movieGenres = array_map('trim', explode(',', $movie['genre']));
+        
+        // Check if the selected genre matches any of the movie's genres (exact match, case-insensitive)
+        foreach ($movieGenres as $genre) {
+            if (strcasecmp(trim($genre), $selectedGenre) === 0) {
+                return true;
+            }
+        }
+        return false;
     });
 }
 
@@ -161,10 +175,14 @@ $conn->close();
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
             <div>
                 <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;"><i class="fas fa-film"></i> Filter by Genre</label>
+                <!-- FIXED: Properly encode genre values when building the URL -->
                 <select id="genreSelect" style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.15); border: 2px solid rgba(226, 48, 32, 0.4); border-radius: 10px; color: white; font-size: 1rem; font-weight: 500; cursor: pointer; transition: all 0.3s ease; appearance: none; background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" fill=\"white\" viewBox=\"0 0 20 20\"><path d=\"M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z\"/></svg>'); background-repeat: no-repeat; background-position: right 16px center; background-size: 16px;">
                     <option value="all" style="background: var(--bg-card); color: white;" <?php echo !$selectedGenre ? 'selected' : ''; ?>>All Genres</option>
                     <?php foreach ($allGenres as $genre): ?>
-                    <option value="<?php echo urlencode($genre); ?>" style="background: var(--bg-card); color: white;" <?php echo $selectedGenre === $genre ? 'selected' : ''; ?>><?php echo htmlspecialchars($genre); ?></option>
+                    <!-- FIXED: Use raw genre value without double encoding -->
+                    <option value="<?php echo htmlspecialchars($genre); ?>" style="background: var(--bg-card); color: white;" <?php echo $selectedGenre === $genre ? 'selected' : ''; ?>>
+                        <?php echo htmlspecialchars($genre); ?>
+                    </option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -286,7 +304,7 @@ $conn->close();
                     </div>
                     <?php endif; ?>
                     
-                    <!-- Schedule Dropdown - Directly above buttons with consistent spacing -->
+                    <!-- Schedule Dropdown -->
                     <?php if (($filter === 'now-showing' || $filter === 'all') && !empty($schedules[$movie['id']])): ?>
                     <div style="margin-bottom: 15px; width: 100%;">
                         <select class="schedule-select" data-movie-id="<?php echo $movie['id']; ?>" style="width: 100%; padding: 12px 14px; background: rgba(255, 255, 255, 0.15); border: 2px solid rgba(226, 48, 32, 0.4); border-radius: 8px; color: white; font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: all 0.3s ease; appearance: none; background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" fill=\"white\" viewBox=\"0 0 20 20\"><path d=\"M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z\"/></svg>'); background-repeat: no-repeat; background-position: right 14px center; background-size: 14px;">
@@ -304,7 +322,7 @@ $conn->close();
                     </div>
                     <?php endif; ?>
                     
-                    <!-- Buttons - Fixed height container to ensure consistent alignment -->
+                    <!-- Buttons -->
                     <div style="display: flex; gap: 5px; margin-top: auto; min-height: 45px;">
                         <?php if (!empty($movie['trailer_url'])): ?>
                         <a href="<?php echo $movie['trailer_url']; ?>" target="_blank" style="background: rgba(255, 0, 0, 0.2); color: #ff0000; border: 2px solid rgba(255, 0, 0, 0.3); padding: 8px; border-radius: 8px; font-weight: 600; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; width: 45px; text-decoration: none;" title="Watch Trailer">
@@ -477,12 +495,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const ratingSelect = document.getElementById('ratingSelect');
     const filter = '<?php echo $filter; ?>';
     
+    // FIXED: Properly handle genre selection with special characters
     genreSelect.addEventListener('change', function() {
         const genre = this.value;
         const rating = ratingSelect.value;
         let url = '?page=movies&filter=' + filter;
         
         if (genre && genre !== 'all') {
+            // Properly URL encode the genre value to preserve special characters
             url += '&genre=' + encodeURIComponent(genre);
         }
         

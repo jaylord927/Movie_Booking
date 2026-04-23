@@ -160,14 +160,15 @@ require_once $root_dir . '/partials/header.php';
     </div>
     <?php endif; ?>
 
-    <!-- Venue Information Section with Embedded Map -->
-    <?php if (!empty($movie['venue_name']) || !empty($movie['venue_location']) || !empty($movie['google_maps_link'])): ?>
+    <!-- Venue Information Section with Venue Photo -->
+    <?php if (!empty($movie['venue_name']) || !empty($movie['venue_location']) || !empty($movie['google_maps_link']) || !empty($movie['venue_photo_path'])): ?>
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 20px; padding: 30px; border: 1px solid rgba(226, 48, 32, 0.3); margin-bottom: 40px;">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
             <i class="fas fa-map-marker-alt" style="color: #e74c3c;"></i> Venue Information
         </h2>
         
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start;">
+            <!-- Left Column: Location Details and Map Button -->
             <div>
                 <?php if (!empty($movie['venue_name'])): ?>
                 <div style="margin-bottom: 20px;">
@@ -185,44 +186,63 @@ require_once $root_dir . '/partials/header.php';
                 
                 <?php if (!empty($movie['google_maps_link'])): ?>
                 <a href="<?php echo $movie['google_maps_link']; ?>" target="_blank" 
-                   style="display: inline-flex; align-items: center; gap: 10px; background: #e74c3c; color: white; padding: 15px 30px; border-radius: 10px; text-decoration: none; font-weight: 600; margin-top: 15px; transition: all 0.3s ease;">
+                   style="display: inline-flex; align-items: center; gap: 10px; background: #e74c3c; color: white; padding: 15px 30px; border-radius: 10px; text-decoration: none; font-weight: 600; margin-top: 15px; transition: all 0.3s ease;"
+                   onmouseover="this.style.background='#c0392b'; this.style.transform='translateY(-2px)';"
+                   onmouseout="this.style.background='#e74c3c'; this.style.transform='translateY(0)';">
                     <i class="fas fa-map-marked-alt"></i> Open in Google Maps
                     <i class="fas fa-external-link-alt" style="font-size: 0.8rem;"></i>
                 </a>
                 <?php endif; ?>
             </div>
             
-            <?php if (!empty($movie['google_maps_link'])): 
-                // Extract coordinates from Google Maps link
-                $embed_url = '';
-                if (preg_match('/q=([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
-                    $lat = $matches[1];
-                    $lng = $matches[2];
-                    $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
-                } elseif (preg_match('/@([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
-                    $lat = $matches[1];
-                    $lng = $matches[2];
-                    $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
-                } else {
-                    $embed_url = "https://maps.google.com/maps?q=" . urlencode($movie['venue_location'] ?? $movie['venue_name'] ?? '') . "&z=15&output=embed";
-                }
-            ?>
-            <div style="background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;">
-                <div style="color: white; font-weight: 600; margin-bottom: 15px;">📍 Location Map</div>
-                <div style="position: relative; padding-bottom: 75%; height: 0; overflow: hidden; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3);">
-                    <iframe 
-                        style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" 
-                        src="<?php echo $embed_url; ?>" 
-                        allowfullscreen="" 
-                        loading="lazy">
-                    </iframe>
+            <!-- Right Column: Venue Photo - FIXED: Removed onerror text issue -->
+            <div>
+                <?php if (!empty($movie['venue_photo_path'])): ?>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;">
+                    <div style="color: white; font-weight: 600; margin-bottom: 15px;">
+                        <i class="fas fa-camera"></i> Venue Photo
+                    </div>
+                    <div style="text-align: center;">
+                        <img src="<?php echo SITE_URL . $movie['venue_photo_path']; ?>" 
+                             alt="<?php echo htmlspecialchars($movie['venue_name'] ?? 'Venue'); ?> Photo"
+                             style="max-width: 100%; max-height: 250px; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3); object-fit: cover;">
+                    </div>
                 </div>
-                <div style="color: var(--pale-red); font-size: 0.85rem; margin-top: 10px; text-align: center;">
-                    <i class="fas fa-info-circle"></i> Exact location shown on map
-                </div>
+                <?php endif; ?>
             </div>
-            <?php endif; ?>
         </div>
+
+        <!-- Embedded Map (if available) - Below both columns -->
+        <?php if (!empty($movie['google_maps_link'])): 
+            // Extract coordinates from Google Maps link
+            $embed_url = '';
+            if (preg_match('/q=([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
+                $lat = $matches[1];
+                $lng = $matches[2];
+                $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
+            } elseif (preg_match('/@([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
+                $lat = $matches[1];
+                $lng = $matches[2];
+                $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
+            } else {
+                $embed_url = "https://maps.google.com/maps?q=" . urlencode($movie['venue_location'] ?? $movie['venue_name'] ?? '') . "&z=15&output=embed";
+            }
+        ?>
+        <div style="margin-top: 30px; background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;">
+            <div style="color: white; font-weight: 600; margin-bottom: 15px;">📍 Location Map</div>
+            <div style="position: relative; padding-bottom: 50%; height: 0; overflow: hidden; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3);">
+                <iframe 
+                    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" 
+                    src="<?php echo $embed_url; ?>" 
+                    allowfullscreen="" 
+                    loading="lazy">
+                </iframe>
+            </div>
+            <div style="color: var(--pale-red); font-size: 0.85rem; margin-top: 10px; text-align: center;">
+                <i class="fas fa-info-circle"></i> Exact location shown on map
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
     <?php endif; ?>
 
@@ -405,6 +425,11 @@ require_once $root_dir . '/partials/header.php';
     
     h1 {
         font-size: 2rem !important;
+    }
+    
+    .venue-section > div {
+        grid-template-columns: 1fr;
+        gap: 20px;
     }
 }
 </style>

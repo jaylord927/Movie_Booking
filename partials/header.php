@@ -8,7 +8,7 @@ if (session_status() == PHP_SESSION_NONE) {
 
 // Define SITE_URL if not defined
 if (!defined('SITE_URL')) {
-    define('SITE_URL', 'http://localhost/Movie/');
+    define('SITE_URL', 'http://localhost/Movie_Booking/');
 }
 ?>
 <!DOCTYPE html>
@@ -57,12 +57,14 @@ if (!defined('SITE_URL')) {
         }
         
         .header-container {
-            max-width: 1300px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 0 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
         }
         
         .logo {
@@ -70,6 +72,7 @@ if (!defined('SITE_URL')) {
             align-items: center;
             gap: 15px;
             text-decoration: none;
+            flex-shrink: 0;
         }
         
         .logo-icon {
@@ -96,10 +99,18 @@ if (!defined('SITE_URL')) {
             font-weight: 500;
         }
         
+        .nav-section {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
         .nav-links {
             display: flex;
             gap: 5px;
             align-items: center;
+            flex-wrap: wrap;
         }
         
         .nav-link {
@@ -254,17 +265,29 @@ if (!defined('SITE_URL')) {
         @media (max-width: 1000px) {
             .header-container {
                 flex-direction: column;
-                gap: 15px;
+            }
+            
+            .nav-section {
+                justify-content: center;
             }
             
             .nav-links {
-                flex-wrap: wrap;
                 justify-content: center;
             }
             
             .user-section {
-                flex-wrap: wrap;
                 justify-content: center;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .nav-links {
+                gap: 3px;
+            }
+            
+            .nav-link {
+                padding: 6px 12px;
+                font-size: 0.85rem;
             }
         }
         
@@ -296,7 +319,7 @@ if (!defined('SITE_URL')) {
                 </div>
             </a>
             
-            <div style="display: flex; align-items: center; gap: 20px;">
+            <div class="nav-section">
                 <nav class="nav-links">
                     <?php
                     // Determine current page for active state
@@ -311,6 +334,11 @@ if (!defined('SITE_URL')) {
                     <a href="<?php echo SITE_URL; ?>index.php?page=movies" 
                        class="nav-link <?php echo $current_page == 'movies' ? 'active' : ''; ?>">
                         <i class="fas fa-film"></i> Movies
+                    </a>
+                    
+                    <a href="<?php echo SITE_URL; ?>index.php?page=venue" 
+                       class="nav-link <?php echo $current_page == 'venue' ? 'active' : ''; ?>">
+                        <i class="fas fa-map-marker-alt"></i> Venue
                     </a>
                     
                     <?php if (isset($_SESSION['user_id']) && $_SESSION['user_role'] === 'Customer'): ?>
@@ -328,7 +356,7 @@ if (!defined('SITE_URL')) {
                 
                 <div class="user-section">
                     <?php if (isset($_SESSION['user_id'])): ?>
-                        <!-- User Profile - Clickable link to profile.php with hover effect -->
+                        <!-- User Profile -->
                         <a href="<?php echo SITE_URL; ?>index.php?page=customer/profile" class="user-profile-link">
                             <div class="user-profile <?php echo $current_page == 'customer/profile' ? 'active' : ''; ?>">
                                 <div class="user-avatar">

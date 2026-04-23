@@ -23,6 +23,15 @@ $success = '';
 $edit_mode = false;
 $edit_schedule = null;
 
+// MODIFIED: Only fetch active movies for the dropdown
+$movies_result = $conn->query("SELECT id, title, standard_price, premium_price, sweet_spot_price FROM movies WHERE is_active = 1 ORDER BY title");
+$movies = [];
+if ($movies_result) {
+    while ($row = $movies_result->fetch_assoc()) {
+        $movies[] = $row;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_schedule'])) {
     $movie_id = intval($_POST['movie_id']);
     $show_date = htmlspecialchars(trim($_POST['show_date']));
@@ -122,7 +131,7 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_schedule']
     $current_schedule = $current_result->fetch_assoc();
     $current_stmt->close();
     
-    $movie_stmt = $conn->prepare("SELECT title FROM movies WHERE id = ?");
+    $movie_stmt = $conn->prepare("SELECT title FROM movies WHERE id = ? AND is_active = 1");
     $movie_stmt->bind_param("i", $movie_id);
     $movie_stmt->execute();
     $movie_result = $movie_stmt->get_result();
@@ -176,7 +185,7 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_schedule']
                 $delete_stmt->close();
                 
             } elseif ($total_seats > $current_count) {
-                $movie_prices_stmt = $conn->prepare("SELECT standard_price, premium_price, sweet_spot_price FROM movies WHERE id = ?");
+                $movie_prices_stmt = $conn->prepare("SELECT standard_price, premium_price, sweet_spot_price FROM movies WHERE id = ? AND is_active = 1");
                 $movie_prices_stmt->bind_param("i", $movie_id);
                 $movie_prices_stmt->execute();
                 $movie_prices_result = $movie_prices_stmt->get_result();
@@ -280,7 +289,7 @@ elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     }
 }
 
-// MODIFIED: Only fetch movies that have schedules, ordered by ID DESC (highest first)
+// Fetch schedules - MODIFIED to only show schedules from active movies
 $schedules_result = $conn->query("
     SELECT s.*, m.title as movie_title_full, m.standard_price, m.premium_price, m.sweet_spot_price,
            (SELECT COUNT(*) FROM tbl_booking b 
@@ -290,7 +299,7 @@ $schedules_result = $conn->query("
             AND b.status != 'Cancelled') as booking_count
     FROM movie_schedules s
     LEFT JOIN movies m ON s.movie_id = m.id
-    WHERE s.is_active = 1 
+    WHERE s.is_active = 1 AND m.is_active = 1
     ORDER BY s.id DESC
 ");
 
@@ -307,7 +316,7 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
         SELECT s.*, m.title as movie_title_full, m.standard_price, m.premium_price, m.sweet_spot_price
         FROM movie_schedules s
         LEFT JOIN movies m ON s.movie_id = m.id
-        WHERE s.id = ? AND s.is_active = 1
+        WHERE s.id = ? AND s.is_active = 1 AND m.is_active = 1
     ");
     if ($stmt) {
         $stmt->bind_param("i", $edit_id);
@@ -319,7 +328,7 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
     }
 }
 
-$count_result = $conn->query("SELECT COUNT(*) as total FROM movie_schedules WHERE is_active = 1");
+$count_result = $conn->query("SELECT COUNT(*) as total FROM movie_schedules s LEFT JOIN movies m ON s.movie_id = m.id WHERE s.is_active = 1 AND m.is_active = 1");
 $schedule_count = $count_result ? $count_result->fetch_assoc()['total'] : 0;
 
 $conn->close();

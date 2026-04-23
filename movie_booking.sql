@@ -3,9 +3,9 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Apr 18, 2026 at 12:20 PM
+-- Generation Time: Apr 23, 2026 at 09:23 AM
 -- Server version: 10.4.32-MariaDB
--- PHP Version: 8.2.12
+-- PHP Version: 8.0.30
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
@@ -118,7 +118,8 @@ CREATE TABLE `customer_activity_log` (
 --
 
 INSERT INTO `customer_activity_log` (`id`, `customer_id`, `action_type`, `details`, `movie_id`, `schedule_id`, `booking_id`, `created_at`) VALUES
-(1, 1, 'LOGIN', 'User logged in: jaylord', NULL, NULL, NULL, '2026-04-18 11:22:01');
+(1, 1, 'LOGIN', 'User logged in: jaylord', NULL, NULL, NULL, '2026-04-18 11:22:01'),
+(2, 1, 'LOGIN', 'User logged in: jaylord', NULL, NULL, NULL, '2026-04-21 06:03:56');
 
 -- --------------------------------------------------------
 
@@ -185,7 +186,11 @@ CREATE TABLE `movies` (
 INSERT INTO `movies` (`id`, `title`, `director`, `genre`, `duration`, `rating`, `description`, `poster_url`, `trailer_url`, `venue_name`, `venue_location`, `google_maps_link`, `standard_price`, `premium_price`, `sweet_spot_price`, `is_active`, `added_by`, `updated_by`, `created_at`, `last_updated`) VALUES
 (1, 'Sinners', '', 'Supernatural horror', '2hours', 'PG', 'Sinners (2025) is a supernatural horror-period film directed by Ryan Coogler, set in the 1930s Mississippi Delta. The story follows twin brothers, the Smokestack Twins, who return to their hometown seeking a fresh start after working for the Chicago Mafia. They buy a sawmill and a juke joint, but soon face supernatural troubles that challenge their quest for redemption amidst themes of racism and evil.', 'https://i.pinimg.com/originals/93/b2/ec/93b2ec2431ea0ae34a2dbafc81a1d72e.jpg', 'https://www.youtube.com/watch?v=bKGxHflevuk', 'SM Cinema', 'Purok 13 Cadulawan minglanilla Cebu', 'https://www.google.com/maps/place//@10.2699325,123.7746523,20.83z/data=!4m9!1m8!3m7!1s0x33a977e4598c638d:0xd2016057b1f9cd28!2sMinglanilla,+Cebu!3b1!8m2!3d10.2454293!4d123.7959894!16zL20vMDZoNGhs?entry=ttu&g_ep=EgoyMDI2MDIxOC4wIKXMDSoASAFQAw%3D%3D', 350.00, 800.00, 5500.00, 1, 2, 2, '2026-03-06 15:03:50', '2026-04-16 13:40:18'),
 (2, 'The Notebook', 'Denise', 'Drama/Romance', '123 minutes', 'PG', 'The Notebook is a romantic drama that tells the enduring love story of a young couple from different social backgrounds, recounted decades later by an elderly man from a cherished notebook.', 'https://www.themoviedb.org/t/p/original/wbvboxr6xmdSbMEBKzXVWgAwJ1Q.jpg', 'https://www.youtube.com/watch?v=BjJcYdEOI0k', 'SM Cinema', 'Purok 13 Cadulawan minglanilla Cebu', 'https://www.google.com/maps/place//@10.2699325,123.7746523,20.83z/data=!4m9!1m8!3m7!1s0x33a977e4598c638d:0xd2016057b1f9cd28!2sMinglanilla,+Cebu!3b1!8m2!3d10.2454293!4d123.7959894!16zL20vMDZoNGhs?entry=ttu&amp;amp;g_ep=EgoyMDI2MDIxOC4wIKXMDSoASAFQAw%3D%3D', 350.00, 500.00, 550.00, 1, 2, 2, '2026-03-06 15:14:24', '2026-04-18 11:19:27'),
-(6, 'jay1', '', 'testt', 'testt', 'G', 'test', '', '', '', '', 'https://www.google.com/maps/@10.2701892,123.7749737,3a,75y,61.31h,78.1t/data=!3m7!1e1!3m5!1ss76j3A-wBBsmXsq_bpiIcA!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fcb_client%3Dmaps_sv.tactile%26w%3D900%26h%3D600%26pitch%3D11.90046187165521%26panoid%3Ds76j3A-wBBsmXsq_bpiIcA%26yaw%3D61.30689665955039!7i16384!8i8192?entry=ttu&g_ep=EgoyMDI2MDQxMy4wIKXMDSoASAFQAw%3D%3D', 350.00, 450.00, 550.00, 1, 2, 2, '2026-03-07 04:31:42', '2026-04-16 13:16:17');
+(6, 'jay1', '', 'testt', 'testt', 'G', 'test', '', '', '', '', 'https://www.google.com/maps/@10.2701892,123.7749737,3a,75y,61.31h,78.1t/data=!3m7!1e1!3m5!1ss76j3A-wBBsmXsq_bpiIcA!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fcb_client%3Dmaps_sv.tactile%26w%3D900%26h%3D600%26pitch%3D11.90046187165521%26panoid%3Ds76j3A-wBBsmXsq_bpiIcA%26yaw%3D61.30689665955039!7i16384!8i8192?entry=ttu&g_ep=EgoyMDI2MDQxMy4wIKXMDSoASAFQAw%3D%3D', 350.00, 450.00, 550.00, 0, 2, 2, '2026-03-07 04:31:42', '2026-04-21 06:27:33'),
+(7, 'The Lord of the Rings: The Fellowship of the Ring (2001)', 'Peter Jackson', 'Epic fantasy film', '2 hours, 58 minutes', 'PG', 'The Lord of the Rings: The Fellowship of the Ring (2001) is the first film in Peter Jackson’s epic fantasy trilogy, following Frodo Baggins and his companions on a perilous quest to destroy the One Ring and save Middle-earth.', 'https://i.pinimg.com/originals/b2/07/ab/b207abc102679d8aaa52f30386fd7582.jpg', 'https://www.youtube.com/watch?v=V75dMMIW2B4', 'St. Cecilia College', 'Ward ||, Minglanilla', '', 350.00, 450.00, 550.00, 0, 8, NULL, '2026-04-21 06:35:32', '2026-04-21 06:38:02'),
+(8, 'The Lord of the Rings: The Fellowship of the Ring (2001)', 'Peter Jackson', 'Epic fantasy film', '2 hours, 58 minutes', 'PG', 'The Lord of the Rings: The Fellowship of the Ring (2001) is the first film in Peter Jackson’s epic fantasy trilogy, following Frodo Baggins and his companions on a perilous quest to destroy the One Ring and save Middle-earth.', 'https://i.pinimg.com/originals/b2/07/ab/b207abc102679d8aaa52f30386fd7582.jpg', 'https://www.youtube.com/watch?v=V75dMMIW2B4', 'St. Cecilia College', 'Ward || Minglanilla Cebu City', 'https://www.google.com/maps/place/St.+Cecilia\'s+College+-+Cebu,+Inc./@10.2447327,123.7943992,3a,75y/data=!3m8!1e2!3m6!1sCIHM0ogKEICAgIDBxoOXAg!2e10!3e12!6shttps:%2F%2Flh3.googleusercontent.com%2Fgps-cs-s%2FAPNQkAEAmML6SGBd8CkHl_t_otjagCRH6H184b8r1zb9jdRhy8WmUORDM2i-x3kipkfMl-fEyhds-Lx-y49YcVJGWsaHz-P63cL-exmHGqIM6QsRafqDXb0v0pUD68Z5Q4s1IueHaZ2P%3Dw86-h114-k-no!7i3024!8i4032!4m7!3m6!1s0x33a977e250bd286d:0x377f6ed9ed966fe7!8m2!3d10.2446906!4d123.7944106!10e5!16s%2Fg%2F1tfksvw4?entry=ttu&g_ep=EgoyM', 400.00, 500.00, 700.00, 1, 8, NULL, '2026-04-21 06:36:50', NULL),
+(9, 'Avengers: Endgame', 'Anthony Russo, Joe Russo', 'Superhero film that blends science fiction, action-adventure, drama, and fantasy elements.', '3hours 1minute', 'PG', 'Avengers: Endgame is a 2019 superhero film that concludes the Infinity Saga of the Marvel Cinematic Universe, featuring the Avengers’ final battle against Thanos.', 'https://tse1.mm.bing.net/th/id/OIP.DVYDQX85lQdcPGsSxAd-rgHaKy?rs=1&amp;pid=ImgDetMain&amp;o=7&amp;rm=3', 'https://www.youtube.com/watch?v=TcMBFSGVi1c', 'SM Cinema', '3F, North Reclamation Area, Cebu City', 'https://www.google.com/maps/@10.3115586,123.9210049,3a,75y,33.08h,121.44t/data=!3m7!1e1!3m5!1s5TZxZ7XNorPgSADXduLTBw!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fcb_client%3Dmaps_sv.tactile%26w%3D900%26h%3D600%26pitch%3D-31.435296103195043%26panoid%3D5TZxZ7XNorPgSADXduLTBw%26yaw%3D33.083140167466894!7i16384!8i8192?entry=ttu&g_ep=EgoyMDI2MDQxNS4wIKXMDSoASAFQAw%3D%3D', 1000.00, 1500.00, 2000.00, 1, 8, NULL, '2026-04-21 06:50:05', NULL),
+(10, 'Avengers: Endgame', 'Anthony Russo, Joe Russo', 'Superhero film that blends science fiction, action-adventure, drama, and fantasy elements.', '3hours 1minute', 'PG', 'Avengers: Endgame is a 2019 superhero film that concludes the Infinity Saga of the Marvel Cinematic Universe, featuring the Avengers’ final battle against Thanos.', 'https://tse1.mm.bing.net/th/id/OIP.DVYDQX85lQdcPGsSxAd-rgHaKy?rs=1&amp;pid=ImgDetMain&amp;o=7&amp;rm=3', 'https://www.youtube.com/watch?v=TcMBFSGVi1c', 'SM Cinema', '3F, North Reclamation Area, Cebu City', 'https://www.google.com/maps/@10.3115586,123.9210049,3a,75y,33.08h,121.44t/data=!3m7!1e1!3m5!1s5TZxZ7XNorPgSADXduLTBw!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fcb_client%3Dmaps_sv.tactile%26w%3D900%26h%3D600%26pitch%3D-31.435296103195043%26panoid%3D5TZxZ7XNorPgSADXduLTBw%26yaw%3D33.083140167466894!7i16384!8i8192?entry=ttu&g_ep=EgoyMDI2MDQxNS4wIKXMDSoASAFQAw%3D%3D', 1000.00, 1500.00, 2000.00, 0, 8, NULL, '2026-04-21 06:50:11', '2026-04-21 06:50:44');
 
 -- --------------------------------------------------------
 
@@ -553,11 +558,11 @@ CREATE TABLE `users` (
 --
 
 INSERT INTO `users` (`u_id`, `u_name`, `u_username`, `u_email`, `u_pass`, `u_role`, `u_status`, `is_visible`, `created_by`, `created_by_name`, `created_at`, `last_login`) VALUES
-(1, 'jaylord', 'jaylord', 'jaylord@gmail.com', '$2y$10$9Z2H5XmtJWLLYtc5mQaMYu1fUAEnKWMeBuDNl9MyyI3lByZrjh99O', 'Customer', 'Active', 1, NULL, NULL, '2026-03-06 14:55:55', '2026-04-18 11:22:01'),
+(1, 'jaylord', 'jaylord', 'jaylord@gmail.com', '$2y$10$9Z2H5XmtJWLLYtc5mQaMYu1fUAEnKWMeBuDNl9MyyI3lByZrjh99O', 'Customer', 'Active', 1, NULL, NULL, '2026-03-06 14:55:55', '2026-04-21 06:03:56'),
 (3, 'kenz', 'kenz', 'kenz@gmail.com', '$2y$10$svqh5E6JWT1ExKcMENWMIeEIQ3hTyGFi6Sr23J1SF9em8i8FYUVrS', 'Customer', 'Active', 1, NULL, NULL, '2026-03-06 15:16:25', NULL),
 (4, 'test', 'test', 'test@gmail.com', '$2y$10$DFVjJg47KnHQncqSGBpKU.0ealBTYUP6w8xLm8c57zZ1secAbNqp.', 'Customer', 'Active', 1, NULL, 'denise', '2026-04-16 13:35:17', NULL),
-(7, 'Denise Kethley Cana', 'denise', 'jaylordlaspuna1@gmail.com', '$2y$10$ddfQJoomyC8IwTQZxR6/IuvhByLjHZYSzBkAAvSaPJ/nzuGonTI.W', 'Owner', 'Active', 1, NULL, NULL, '2026-04-18 10:39:32', '2026-04-18 10:49:21'),
-(8, 'jurist', 'jurist', 'jurist@gmail.com', '$2y$10$KbXO5FiiV3lpeHoSwYea3.Vn/Hqjwrx/jtLPe0I9wc573cn4puCu2', 'Admin', 'Active', 1, NULL, NULL, '2026-04-18 10:50:08', '2026-04-18 10:59:17');
+(7, 'Denise Kethley Cana', 'denise', 'jaylordlaspuna1@gmail.com', '$2y$10$ddfQJoomyC8IwTQZxR6/IuvhByLjHZYSzBkAAvSaPJ/nzuGonTI.W', 'Owner', 'Active', 1, NULL, NULL, '2026-04-18 10:39:32', '2026-04-21 06:26:24'),
+(8, 'jurist', 'jurist', 'jurist@gmail.com', '$2y$10$KbXO5FiiV3lpeHoSwYea3.Vn/Hqjwrx/jtLPe0I9wc573cn4puCu2', 'Admin', 'Active', 1, NULL, NULL, '2026-04-18 10:50:08', '2026-04-21 06:40:59');
 
 --
 -- Indexes for dumped tables
@@ -675,7 +680,7 @@ ALTER TABLE `booked_seats`
 -- AUTO_INCREMENT for table `customer_activity_log`
 --
 ALTER TABLE `customer_activity_log`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `manual_payments`
@@ -687,7 +692,7 @@ ALTER TABLE `manual_payments`
 -- AUTO_INCREMENT for table `movies`
 --
 ALTER TABLE `movies`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT for table `movie_schedules`
