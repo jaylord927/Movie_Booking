@@ -18,7 +18,7 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
     </div>
 
     <!-- Tab Buttons -->
-    <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 40px;">
+    <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 40px; flex-wrap: wrap;">
         <a href="?page=privacypolicy_termsservice&tab=terms" 
            style="padding: 15px 40px; background: <?php echo $active_tab == 'terms' ? 'linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%)' : 'rgba(255,255,255,0.1)'; ?>; 
                   color: white; text-decoration: none; border-radius: 50px; font-weight: 700; font-size: 1.1rem; 
@@ -87,16 +87,76 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Manual payment submissions require admin verification and may take minutes to hours during office hours (8:00 AM - 5:00 PM).</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
                             <span>Ticket prices are final and include all applicable taxes. No hidden fees.</span>
                         </li>
                     </ul>
                 </div>
 
-                <!-- 3. Cancellation and Refund Policy -->
+                <!-- 3. QR Code & Entry System -->
+                <div style="margin-bottom: 30px;">
+                    <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
+                        <i class="fas fa-qrcode" style="color: var(--primary-red); margin-right: 10px;"></i>
+                        3. QR Code & Entry System
+                    </h3>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>A unique QR code will be generated for every paid booking. This QR code serves as your digital ticket.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Present your QR code or booking reference at the cinema entrance for verification.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Staff will scan your QR code to verify your booking before issuing a physical ticket.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>QR codes are unique per booking and cannot be reused or shared with other customers.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>For re-entry, customers must present their physical ticket or hand stamp for verification.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- 4. Staff Verification Process -->
+                <div style="margin-bottom: 30px;">
+                    <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
+                        <i class="fas fa-user-check" style="color: var(--primary-red); margin-right: 10px;"></i>
+                        4. Staff Verification & Check-in
+                    </h3>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Staff members are authorized to verify bookings using QR code scanning or booking reference lookup.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Upon verification, customers will receive a physical ticket and a hand stamp for re-entry purposes.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Only customers with valid paid bookings will be granted entry to the cinema.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Staff have the right to deny entry if the booking cannot be verified or appears fraudulent.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- 5. Cancellation, Refund, and Rebooking -->
                 <div style="margin-bottom: 30px;">
                     <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
                         <i class="fas fa-undo-alt" style="color: var(--primary-red); margin-right: 10px;"></i>
-                        3. Cancellation and Refund Policy
+                        5. Cancellation, Refund & Rebooking
                     </h3>
                     <ul style="list-style: none; padding-left: 0;">
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
@@ -109,6 +169,10 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Paid bookings can use the "Rebook" feature to change seats, subject to availability and seat type matching.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
                             <span>Refunds will be processed within 3-5 business days and credited back to your original payment method.</span>
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
@@ -118,11 +182,11 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                     </ul>
                 </div>
 
-                <!-- 4. Seat Selection -->
+                <!-- 6. Seat Selection -->
                 <div style="margin-bottom: 30px;">
                     <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
                         <i class="fas fa-chair" style="color: var(--primary-red); margin-right: 10px;"></i>
-                        4. Seat Selection
+                        6. Seat Selection
                     </h3>
                     <ul style="list-style: none; padding-left: 0;">
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
@@ -131,20 +195,46 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span>Once seats are selected and payment is confirmed, they are locked and cannot be changed.</span>
+                            <span>Three seat types are available: Standard, Premium, and Sweet Spot, each with different pricing.</span>
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span>If you need to change seats, you can use the "Rebook" feature for paid bookings, subject to availability.</span>
+                            <span>Once seats are selected and payment is confirmed, they are locked and cannot be changed without using the Rebook feature.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Real-time availability ensures you never book an already occupied seat.</span>
                         </li>
                     </ul>
                 </div>
 
-                <!-- 5. Customer Responsibilities -->
+                <!-- 7. Venue Information -->
+                <div style="margin-bottom: 30px;">
+                    <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
+                        <i class="fas fa-map-marker-alt" style="color: var(--primary-red); margin-right: 10px;"></i>
+                        7. Venue Information
+                    </h3>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Each movie includes venue details such as name, location, and Google Maps link for easy navigation.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Venue photos are provided to help you identify the cinema location.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Please arrive at the correct venue as indicated in your booking confirmation.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- 8. Customer Responsibilities -->
                 <div style="margin-bottom: 30px;">
                     <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
                         <i class="fas fa-user-check" style="color: var(--primary-red); margin-right: 10px;"></i>
-                        5. Customer Responsibilities
+                        8. Customer Responsibilities
                     </h3>
                     <ul style="list-style: none; padding-left: 0;">
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
@@ -157,42 +247,24 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span>Bring a valid ID and your booking reference for verification at the cinema.</span>
+                            <span>Bring a valid ID and your booking reference or QR code for verification at the cinema.</span>
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
                             <span>Outside food and drinks are not allowed in the cinema premises.</span>
                         </li>
-                    </ul>
-                </div>
-
-                <!-- 6. Mistakes and Errors -->
-                <div style="margin-bottom: 30px;">
-                    <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
-                        <i class="fas fa-exclamation-triangle" style="color: var(--primary-red); margin-right: 10px;"></i>
-                        6. Mistakes and Errors
-                    </h3>
-                    <ul style="list-style: none; padding-left: 0;">
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span>If you made a mistake in your booking, contact us immediately. We'll try to help if the show hasn't started.</span>
-                        </li>
-                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
-                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span>Technical errors during payment will be investigated. Duplicate charges will be refunded.</span>
-                        </li>
-                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
-                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span>We reserve the right to cancel any booking found to be fraudulent or made in error.</span>
+                            <span>Keep your physical ticket and hand stamp for re-entry if you need to step out during the show.</span>
                         </li>
                     </ul>
                 </div>
 
-                <!-- 7. Account Security -->
+                <!-- 9. Account Security -->
                 <div style="margin-bottom: 30px;">
                     <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
                         <i class="fas fa-lock" style="color: var(--primary-red); margin-right: 10px;"></i>
-                        7. Account Security
+                        9. Account Security
                     </h3>
                     <ul style="list-style: none; padding-left: 0;">
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
@@ -210,11 +282,11 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                     </ul>
                 </div>
 
-                <!-- 8. Changes to Terms -->
+                <!-- 10. Changes to Terms -->
                 <div style="margin-bottom: 30px;">
                     <h3 style="color: white; font-size: 1.4rem; margin-bottom: 15px; font-weight: 700;">
                         <i class="fas fa-edit" style="color: var(--primary-red); margin-right: 10px;"></i>
-                        8. Changes to Terms
+                        10. Changes to Terms
                     </h3>
                     <p style="color: var(--pale-red);">
                         We may update these terms from time to time. Continued use of our service after changes means you accept the new terms.
@@ -247,11 +319,15 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span><strong>Booking Information:</strong> Movie selections, seat preferences, and payment history.</span>
+                            <span><strong>Booking Information:</strong> Movie selections, seat preferences, showtimes, and booking history.</span>
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
                             <span><strong>Payment Information:</strong> We do not store credit card details. All payments are processed securely through PayMongo.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span><strong>QR Code Data:</strong> Unique QR codes are generated for each booking containing encrypted booking information.</span>
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
@@ -269,7 +345,7 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                     <ul style="list-style: none; padding-left: 0;">
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span>To process your bookings and send booking confirmations.</span>
+                            <span>To process your bookings and send booking confirmations with QR codes.</span>
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
@@ -281,7 +357,11 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
-                            <span>To prevent fraud and ensure the security of our platform.</span>
+                            <span>To prevent fraud and ensure the security of our platform, including QR code verification.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>Staff may access booking information for verification and check-in purposes.</span>
                         </li>
                     </ul>
                 </div>
@@ -300,6 +380,10 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
                             <span>Booking information is shared with partner cinemas only for ticket verification.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>QR code data is encrypted and only accessible by authorized staff for verification.</span>
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
@@ -329,6 +413,10 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         </li>
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>QR codes are generated uniquely for each booking and cannot be forged.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
                             <span>Regular security audits are conducted to ensure your data stays safe.</span>
                         </li>
                     </ul>
@@ -352,6 +440,10 @@ $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'terms';
                         <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
                             <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
                             <span>You may opt out of marketing communications at any time.</span>
+                        </li>
+                        <li style="margin-bottom: 12px; display: flex; align-items: flex-start; gap: 10px;">
+                            <i class="fas fa-circle" style="color: var(--primary-red); font-size: 0.5rem; margin-top: 8px;"></i>
+                            <span>You can request to have your booking QR codes regenerated if needed.</span>
                         </li>
                     </ul>
                 </div>

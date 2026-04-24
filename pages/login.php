@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     $conn = get_db_connection();
     
-    // The query will now find Owner accounts as well
+    // The query will find Owner, Admin, Staff, and Customer accounts
     $stmt = $conn->prepare("SELECT u_id, u_name, u_username, u_email, u_pass, u_role, u_status FROM users WHERE (u_email = ? OR u_username = ?) AND u_status = 'Active'");
     $stmt->bind_param("ss", $login, $login);
     $stmt->execute();
@@ -48,16 +48,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($user['u_role'] === 'Customer') {
                 log_customer_login($conn, $user['u_id'], $user['u_name']);
             } else {
-                // For admins and owners, just update last_login
+                // For admins, owners, and staff, just update last_login
                 $update_stmt = $conn->prepare("UPDATE users SET last_login = NOW() WHERE u_id = ?");
                 $update_stmt->bind_param("i", $user['u_id']);
                 $update_stmt->execute();
                 $update_stmt->close();
             }
             
-            // Redirect based on role - Owner and Admin both go to admin dashboard
+            // Redirect based on role
             if ($user['u_role'] === 'Admin' || $user['u_role'] === 'Owner') {
                 header("Location: " . SITE_URL . "index.php?page=admin/dashboard");
+                exit();
+            } elseif ($user['u_role'] === 'Staff') {
+                header("Location: " . SITE_URL . "index.php?page=staff/dashboard");
                 exit();
             } else {
                 header("Location: " . SITE_URL . "index.php?page=home");

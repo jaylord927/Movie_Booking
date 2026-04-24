@@ -40,7 +40,7 @@ $booking_stmt = $conn->prepare("
     JOIN users u ON b.u_id = u.u_id
     LEFT JOIN booked_seats bs ON b.b_id = bs.booking_id
     LEFT JOIN movies m ON b.movie_name = m.title
-    WHERE b.b_id = ? AND b.u_id = ?
+    WHERE b.b_id = ? AND b.u_id = ? AND b.payment_status = 'Paid'
     GROUP BY b.b_id
 ");
 $booking_stmt->bind_param("ii", $booking_id, $user_id);
@@ -55,7 +55,9 @@ if ($booking_result->num_rows === 0) {
 
 $booking = $booking_result->fetch_assoc();
 $booking_stmt->close();
-$conn->close();
+
+// Prepare QR code data (will be used by JavaScript)
+$qr_text = $booking['booking_reference'];
 
 $booking_date = date('F d, Y', strtotime($booking['booking_date']));
 $booking_time = date('h:i A', strtotime($booking['booking_date']));
@@ -64,6 +66,9 @@ $show_time = date('h:i A', strtotime($booking['showtime']));
 $seat_count = $booking['total_seats'] ?? 0;
 $seat_list = $booking['seat_list'] ?? 'No seats assigned';
 $is_paid = $booking['payment_status'] == 'Paid';
+$attendance_status = $booking['attendance_status'] ?? 'Pending';
+
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -73,6 +78,8 @@ $is_paid = $booking['payment_status'] == 'Paid';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Booking Receipt - Movie Ticketing System</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- QR Code Library using pure JavaScript (NO server dependencies!) -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -149,6 +156,8 @@ $is_paid = $booking['payment_status'] == 'Paid';
             margin-bottom: 30px;
             padding-bottom: 20px;
             border-bottom: 2px dashed #ddd;
+            flex-wrap: wrap;
+            gap: 15px;
         }
         
         .info-group h3 {
@@ -174,6 +183,16 @@ $is_paid = $booking['payment_status'] == 'Paid';
             color: white;
         }
         
+        .attendance-badge {
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 30px;
+            font-weight: 700;
+            font-size: 1rem;
+            background: <?php echo $attendance_status == 'Present' ? '#2ecc71' : ($attendance_status == 'Completed' ? '#3498db' : '#f39c12'); ?>;
+            color: white;
+        }
+        
         .movie-details {
             display: flex;
             gap: 25px;
@@ -181,6 +200,7 @@ $is_paid = $booking['payment_status'] == 'Paid';
             padding: 20px;
             background: #f8f9fa;
             border-radius: 12px;
+            flex-wrap: wrap;
         }
         
         .movie-poster {
@@ -233,6 +253,39 @@ $is_paid = $booking['payment_status'] == 'Paid';
             display: inline-flex;
             align-items: center;
             gap: 5px;
+        }
+        
+        .qr-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 30px;
+            border: 2px solid #e23020;
+        }
+        
+        .qr-section h4 {
+            color: #e23020;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+        
+        .qr-code {
+            display: inline-block;
+            padding: 10px;
+            background: white;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .qr-code canvas, .qr-code img {
+            width: 150px;
+            height: 150px;
+        }
+        
+        #qrcode {
+            display: flex;
+            justify-content: center;
         }
         
         .details-grid {
@@ -312,18 +365,6 @@ $is_paid = $booking['payment_status'] == 'Paid';
             color: #e23020;
         }
         
-        .payment-status {
-            text-align: right;
-            margin-top: 10px;
-            color: #666;
-            font-size: 0.95rem;
-        }
-        
-        .payment-status span {
-            font-weight: 700;
-            color: <?php echo $is_paid ? '#2ecc71' : '#e74c3c'; ?>;
-        }
-        
         .terms-section {
             border-top: 2px dashed #ddd;
             padding-top: 20px;
@@ -356,6 +397,7 @@ $is_paid = $booking['payment_status'] == 'Paid';
             display: flex;
             gap: 15px;
             justify-content: center;
+            flex-wrap: wrap;
         }
         
         .btn {
@@ -396,6 +438,16 @@ $is_paid = $booking['payment_status'] == 'Paid';
             box-shadow: 0 8px 25px rgba(52, 152, 219, 0.4);
         }
         
+        .btn-success {
+            background: #2ecc71;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #27ae60;
+            transform: translateY(-3px);
+        }
+        
         .btn-close {
             background: #95a5a6;
             color: white;
@@ -407,7 +459,7 @@ $is_paid = $booking['payment_status'] == 'Paid';
         }
         
         @media print {
-            .action-buttons {
+            .action-buttons, .qr-section .btn {
                 display: none;
             }
             
@@ -442,7 +494,6 @@ $is_paid = $booking['payment_status'] == 'Paid';
             
             .receipt-info {
                 flex-direction: column;
-                gap: 15px;
                 text-align: center;
             }
         }
@@ -450,7 +501,7 @@ $is_paid = $booking['payment_status'] == 'Paid';
 </head>
 <body>
     <div class="receipt-wrapper">
-        <div class="receipt-container">
+        <div class="receipt-container" id="receiptContent">
             <div class="receipt-header">
                 <h1>MOVIE TICKETING</h1>
                 <p>Book Your Favorite Movies</p>
@@ -467,12 +518,32 @@ $is_paid = $booking['payment_status'] == 'Paid';
                 <div class="receipt-info">
                     <div class="info-group">
                         <h3>Booking Reference</h3>
-                        <div class="info-value"><?php echo htmlspecialchars($booking['booking_reference'] ?? ''); ?></div>
+                        <div class="info-value" id="bookingReference"><?php echo htmlspecialchars($booking['booking_reference'] ?? ''); ?></div>
                     </div>
                     <div class="info-group">
                         <h3>Payment Status</h3>
                         <span class="payment-badge"><?php echo htmlspecialchars($booking['payment_status'] ?? ''); ?></span>
                     </div>
+                    <div class="info-group">
+                        <h3>Attendance Status</h3>
+                        <span class="attendance-badge">
+                            <?php echo $attendance_status == 'Present' ? '✓ Checked In' : ($attendance_status == 'Completed' ? 'Completed' : 'Pending'); ?>
+                        </span>
+                    </div>
+                </div>
+                
+                <!-- QR Code Section - Generated by JavaScript -->
+                <div class="qr-section">
+                    <h4><i class="fas fa-qrcode"></i> Scan for Entry</h4>
+                    <div class="qr-code">
+                        <div id="qrcode"></div>
+                    </div>
+                    <p style="color: #666; font-size: 0.85rem; margin-top: 10px;">
+                        Present this QR code at the cinema entrance for verification
+                    </p>
+                    <p style="color: #e23020; font-size: 0.8rem; margin-top: 5px;">
+                        <i class="fas fa-info-circle"></i> Booking Reference: <strong><?php echo $booking['booking_reference']; ?></strong>
+                    </p>
                 </div>
                 
                 <div class="movie-details">
@@ -557,37 +628,27 @@ $is_paid = $booking['payment_status'] == 'Paid';
                         <span>Ticket Price (<?php echo $seat_count; ?> seat(s))</span>
                         <span class="amount">₱<?php echo number_format($booking['booking_fee'] ?? 0, 2); ?></span>
                     </div>
-                    <div class="price-row">
-                        <span>Service Fee</span>
-                        <span class="amount">₱0.00</span>
-                    </div>
-                    <div class="price-row">
-                        <span>Tax (Included)</span>
-                        <span class="amount">₱0.00</span>
-                    </div>
                     <div class="price-row total">
-                        <span>TOTAL AMOUNT</span>
+                        <span>TOTAL AMOUNT PAID</span>
                         <span class="amount">₱<?php echo number_format($booking['booking_fee'] ?? 0, 2); ?></span>
-                    </div>
-                    <div class="payment-status">
-                        Payment Status: <span><?php echo htmlspecialchars($booking['payment_status'] ?? ''); ?></span>
                     </div>
                 </div>
                 
                 <div class="terms-section">
-                    <h4>TERMS & CONDITIONS</h4>
+                    <h4>IMPORTANT INSTRUCTIONS</h4>
                     <ul>
-                        <li>This ticket is non-transferable and non-refundable</li>
+                        <li>Please present this QR code or Booking Reference at the entrance</li>
+                        <li>A staff member will scan your QR code to verify your booking</li>
+                        <li>After verification, you will receive a physical ticket</li>
+                        <li>Keep your physical ticket for re-entry if you need to step out</li>
                         <li>Please arrive at least 30 minutes before the showtime</li>
-                        <li>Valid ID required for verification</li>
-                        <li>Children under 3 years are free (no seat provided)</li>
-                        <li>Outside food and drinks are not allowed</li>
+                        <li>Latecomers may not be admitted</li>
                     </ul>
                 </div>
                 
                 <div class="receipt-footer">
                     <p>Thank you for choosing Movie Ticketing System!</p>
-                    <p style="margin-top: 10px;">Please present this receipt at the counter</p>
+                    <p style="margin-top: 10px;">Please present this QR code at the counter for verification</p>
                     <p style="margin-top: 5px; font-style: italic;">Enjoy the show! 🎬</p>
                 </div>
             </div>
@@ -597,21 +658,60 @@ $is_paid = $booking['payment_status'] == 'Paid';
             <button onclick="window.close()" class="btn btn-close">
                 <i class="fas fa-times"></i> Close
             </button>
-            <button onclick="window.print()" class="btn btn-secondary">
+            <button onclick="downloadQRCode()" class="btn btn-success" id="downloadBtn">
+                <i class="fas fa-download"></i> Save QR Code
+            </button>
+            <button onclick="copyBookingReference()" class="btn btn-secondary">
+                <i class="fas fa-copy"></i> Copy Reference
+            </button>
+            <button onclick="window.print()" class="btn btn-primary">
                 <i class="fas fa-print"></i> Print Receipt
             </button>
-            <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" class="btn btn-primary">
-                <i class="fas fa-arrow-left"></i> Back to My Bookings
-            </a>
         </div>
     </div>
     
     <script>
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
-            window.close();
+        // Generate QR code using JavaScript (no server required!)
+        const qrText = '<?php echo $qr_text; ?>';
+        
+        // Create QR code
+        const qrcodeContainer = document.getElementById('qrcode');
+        new QRCode(qrcodeContainer, {
+            text: qrText,
+            width: 150,
+            height: 150,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.H
+        });
+        
+        // Function to download QR code
+        function downloadQRCode() {
+            const qrCanvas = document.querySelector('#qrcode canvas');
+            if (qrCanvas) {
+                const link = document.createElement('a');
+                link.download = 'booking_<?php echo $booking['booking_reference']; ?>_qrcode.png';
+                link.href = qrCanvas.toDataURL();
+                link.click();
+            } else {
+                alert('QR code not ready yet. Please try again.');
+            }
         }
-    });
+        
+        function copyBookingReference() {
+            const reference = document.getElementById('bookingReference').innerText;
+            navigator.clipboard.writeText(reference).then(() => {
+                alert('Booking Reference copied: ' + reference);
+            }).catch(() => {
+                prompt('Press Ctrl+C to copy:', reference);
+            });
+        }
+        
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                window.close();
+            }
+        });
     </script>
 </body>
 </html>

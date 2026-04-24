@@ -147,19 +147,25 @@ $conn->close();
                 
                 <!-- Two Column Layout: Venue Photo + Map -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 0 25px 20px 25px; flex: 1;">
-                    <!-- Venue Photo Column -->
+                    <!-- Venue Photo Column - MODIFIED with click-to-expand -->
                     <div style="display: flex; flex-direction: column;">
                         <?php if (!empty($venue['venue_photo_path']) && file_exists($root_dir . '/' . $venue['venue_photo_path'])): ?>
                         <div style="background: rgba(0,0,0,0.3); border-radius: 12px; padding: 15px; height: 100%; display: flex; flex-direction: column;">
                             <div style="color: white; font-weight: 600; margin-bottom: 12px; font-size: 0.9rem;">
                                 <i class="fas fa-camera"></i> Venue Photo
                             </div>
-                            <div style="text-align: center; overflow: hidden; border-radius: 10px; flex: 1;">
+                            <div style="text-align: center; overflow: hidden; border-radius: 10px; flex: 1; cursor: pointer;" 
+                                 onclick="openFullImage('<?php echo SITE_URL . $venue['venue_photo_path']; ?>', '<?php echo htmlspecialchars($venue['venue_name']); ?>')">
                                 <img src="<?php echo SITE_URL . $venue['venue_photo_path']; ?>" 
                                      alt="<?php echo htmlspecialchars($venue['venue_name']); ?> Photo"
-                                     style="width: 100%; height: 200px; object-fit: cover; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3); transition: transform 0.3s ease;"
+                                     style="width: 100%; height: 200px; object-fit: cover; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3); transition: transform 0.3s ease; cursor: pointer;"
                                      onmouseover="this.style.transform='scale(1.02)';"
                                      onmouseout="this.style.transform='scale(1)';">
+                            </div>
+                            <div style="margin-top: 10px; text-align: center;">
+                                <span style="color: var(--pale-red); font-size: 0.75rem; cursor: pointer;" onclick="openFullImage('<?php echo SITE_URL . $venue['venue_photo_path']; ?>', '<?php echo htmlspecialchars($venue['venue_name']); ?>')">
+                                    <i class="fas fa-search-plus"></i> Click photo to view full size
+                                </span>
                             </div>
                         </div>
                         <?php else: ?>
@@ -227,6 +233,20 @@ $conn->close();
             </p>
         </div>
     <?php endif; ?>
+</div>
+
+<!-- Full Image Modal -->
+<div id="imageModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 10000; justify-content: center; align-items: center; cursor: pointer; padding: 20px;"
+     onclick="closeFullImage()">
+    <div style="max-width: 90%; max-height: 90%; text-align: center;">
+        <img id="fullImage" src="" alt="" style="max-width: 100%; max-height: 80vh; border-radius: 10px; border: 3px solid var(--primary-red);">
+        <div style="margin-top: 20px; color: white;">
+            <p id="imageCaption" style="margin-bottom: 10px;"></p>
+            <span style="background: rgba(255,255,255,0.2); padding: 8px 20px; border-radius: 30px; font-size: 0.9rem;">
+                <i class="fas fa-times-circle"></i> Click anywhere to close
+            </span>
+        </div>
+    </div>
 </div>
 
 <style>
@@ -334,6 +354,15 @@ iframe {
         flex-direction: column;
     }
 }
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+#imageModal {
+    animation: fadeIn 0.3s ease;
+}
 </style>
 
 <script>
@@ -342,6 +371,36 @@ document.addEventListener('DOMContentLoaded', function() {
     venueCards.forEach((card, index) => {
         card.style.animationDelay = `${index * 0.1}s`;
     });
+});
+
+function openFullImage(imageUrl, venueName) {
+    const modal = document.getElementById('imageModal');
+    const fullImage = document.getElementById('fullImage');
+    const caption = document.getElementById('imageCaption');
+    
+    fullImage.src = imageUrl;
+    caption.innerHTML = `<i class="fas fa-building"></i> ${escapeHtml(venueName)} - Venue Photo`;
+    modal.style.display = 'flex';
+}
+
+function closeFullImage() {
+    const modal = document.getElementById('imageModal');
+    modal.style.display = 'none';
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Close modal with Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeFullImage();
+    }
 });
 </script>
 
