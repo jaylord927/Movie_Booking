@@ -12,61 +12,46 @@ require_once $root_dir . '/partials/staff-header.php';
 
 $conn = get_db_connection();
 $selected_movie = isset($_GET['movie']) ? urldecode($_GET['movie']) : '';
-$selected_schedule = isset($_GET['schedule']) ? intval($_GET['schedule']) : 0;
-$error = '';
-$success = '';
+$selected_movie_title = '';
+$selected_show_date = '';
+$selected_show_time = '';
 
-// Get today's date
-$today = date('Y-m-d');
-$current_time = date('H:i:s');
-
-// Get movies that have verified (Present) bookings
+// Get movies that have verified (Present) bookings - grouped by movie AND showtime
 $movies_stmt = $conn->prepare("
     SELECT DISTINCT 
         b.movie_name,
         b.show_date,
         b.showtime,
-        TIME_TO_SEC(TIMEDIFF(b.showtime, NOW())) as seconds_until_show
+        CONCAT(b.movie_name, '|', b.show_date, '|', b.showtime) as unique_key
     FROM tbl_booking b
-    WHERE b.show_date = CURDATE() 
-    AND b.attendance_status = 'Present'
+    WHERE b.attendance_status = 'Present'
     AND b.payment_status = 'Paid'
-    ORDER BY b.showtime
+    ORDER BY b.show_date, b.showtime, b.movie_name
 ");
 $movies_stmt->execute();
 $movies_result = $movies_stmt->get_result();
 $movies = [];
 while ($row = $movies_result->fetch_assoc()) {
-    $movies[] = $row;
+    $unique_key = $row['unique_key'];
+    $movies[$unique_key] = [
+        'movie_name' => $row['movie_name'],
+        'show_date' => $row['show_date'],
+        'showtime' => $row['showtime']
+    ];
 }
 $movies_stmt->close();
 
 // Get verified bookings for selected movie
 $bookings = [];
-$selected_movie_title = '';
-$selected_show_time = '';
-$selected_show_date = '';
+$grouped_bookings = [];
 
 if ($selected_movie) {
-    $selected_movie_title = $selected_movie;
+    $selected_parts = explode('|', $selected_movie);
+    $selected_movie_title = $selected_parts[0];
+    $selected_show_date = $selected_parts[1] ?? '';
+    $selected_show_time = $selected_parts[2] ?? '';
     
-    // First get the showtime and date for this movie
-    $showtime_stmt = $conn->prepare("
-        SELECT DISTINCT showtime, show_date 
-        FROM tbl_booking 
-        WHERE movie_name = ? AND show_date = CURDATE() AND attendance_status = 'Present'
-        LIMIT 1
-    ");
-    $showtime_stmt->bind_param("s", $selected_movie);
-    $showtime_stmt->execute();
-    $showtime_result = $showtime_stmt->get_result();
-    if ($showtime_data = $showtime_result->fetch_assoc()) {
-        $selected_show_time = $showtime_data['showtime'];
-        $selected_show_date = $showtime_data['show_date'];
-    }
-    $showtime_stmt->close();
-    
-    // Get all verified bookings for this movie with individual seats
+    // Get all verified bookings for this specific movie showtime
     $bookings_stmt = $conn->prepare("
         SELECT 
             b.b_id, 
@@ -85,66 +70,87 @@ if ($selected_movie) {
         LEFT JOIN booked_seats bs ON b.b_id = bs.booking_id
         LEFT JOIN users u ON b.u_id = u.u_id
         WHERE b.movie_name = ? 
-        AND b.show_date = CURDATE() 
-        AND b.attendance_status = 'Present' 
+        AND b.show_date = ? 
+        AND b.showtime = ? 
+        AND b.attendance_status = 'Present'
         AND b.payment_status = 'Paid'
         ORDER BY b.booking_reference, bs.seat_number
     ");
-    $bookings_stmt->bind_param("s", $selected_movie);
+    $bookings_stmt->bind_param("sss", $selected_movie_title, $selected_show_date, $selected_show_time);
     $bookings_stmt->execute();
     $bookings_result = $bookings_stmt->get_result();
     
+    $bookings = [];
     while ($row = $bookings_result->fetch_assoc()) {
         $bookings[] = $row;
     }
     $bookings_stmt->close();
-}
-
-// Group bookings by customer
-$grouped_bookings = [];
-foreach ($bookings as $booking) {
-    $key = $booking['booking_reference'];
-    if (!isset($grouped_bookings[$key])) {
-        $grouped_bookings[$key] = [
-            'booking_reference' => $booking['booking_reference'],
-            'customer_name' => $booking['customer_name'],
-            'customer_email' => $booking['customer_email'],
-            'movie_name' => $booking['movie_name'],
-            'show_date' => $booking['show_date'],
-            'showtime' => $booking['showtime'],
-            'verified_at' => $booking['verified_at'],
-            'seats' => []
+    
+    // Group bookings by customer
+    $grouped_bookings = [];
+    foreach ($bookings as $booking) {
+        $key = $booking['booking_reference'];
+        if (!isset($grouped_bookings[$key])) {
+            $grouped_bookings[$key] = [
+                'booking_reference' => $booking['booking_reference'],
+                'customer_name' => $booking['customer_name'],
+                'customer_email' => $booking['customer_email'],
+                'movie_name' => $booking['movie_name'],
+                'show_date' => $booking['show_date'],
+                'showtime' => $booking['showtime'],
+                'verified_at' => $booking['verified_at'],
+                'seats' => []
+            ];
+        }
+        $grouped_bookings[$key]['seats'][] = [
+            'seat_number' => $booking['seat_number'],
+            'seat_type' => $booking['seat_type'],
+            'price' => $booking['price']
         ];
     }
-    $grouped_bookings[$key]['seats'][] = [
-        'seat_number' => $booking['seat_number'],
-        'seat_type' => $booking['seat_type'],
-        'price' => $booking['price']
-    ];
 }
 
 $conn->close();
 ?>
 
 <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 30px; border: 1px solid rgba(52, 152, 219, 0.2);">
-    <h2 style="color: white; font-size: 1.8rem; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
-        <i class="fas fa-print"></i> Print Tickets
-    </h2>
-    <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 25px;">Select a movie to print verified tickets (customers who have checked in)</p>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+        <div>
+            <h2 style="color: white; font-size: 1.8rem; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                <i class="fas fa-print"></i> Print Tickets
+            </h2>
+            <p style="color: rgba(255, 255, 255, 0.7);">Select a movie to print verified tickets (customers who have checked in)</p>
+        </div>
+        <button onclick="refreshPage()" style="background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+            <i class="fas fa-sync-alt"></i> Refresh Page
+        </button>
+    </div>
 
     <!-- Movie Selection -->
     <div style="background: rgba(0, 0, 0, 0.2); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
         <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px;">
-            <i class="fas fa-film"></i> Select Movie
+            <i class="fas fa-film"></i> Select Movie & Showtime
         </label>
         <form method="GET" action="" id="movieSelectForm">
             <input type="hidden" name="page" value="staff/print-ticket">
             <div style="display: flex; gap: 15px; flex-wrap: wrap;">
                 <select name="movie" required id="movieSelect" style="flex: 1; padding: 14px 16px; background: rgba(255,255,255,0.08); border: 2px solid rgba(46,204,113,0.3); border-radius: 10px; color: white; font-size: 1rem; cursor: pointer;">
                     <option value="" style="background: #2c3e50;">-- Select a movie --</option>
-                    <?php foreach ($movies as $movie): ?>
-                    <option value="<?php echo htmlspecialchars($movie['movie_name']); ?>" style="background: #2c3e50;" <?php echo $selected_movie == $movie['movie_name'] ? 'selected' : ''; ?>>
-                        <?php echo htmlspecialchars($movie['movie_name']); ?> - <?php echo date('h:i A', strtotime($movie['showtime'])); ?>
+                    <?php 
+                    // Sort movies by date and time (earliest first)
+                    uasort($movies, function($a, $b) {
+                        $dateTimeA = strtotime($a['show_date'] . ' ' . $a['showtime']);
+                        $dateTimeB = strtotime($b['show_date'] . ' ' . $b['showtime']);
+                        return $dateTimeA - $dateTimeB;
+                    });
+                    
+                    foreach ($movies as $unique_key => $movie): 
+                        $is_today = date('Y-m-d') == $movie['show_date'];
+                        $display_key = $movie['movie_name'] . '|' . $movie['show_date'] . '|' . $movie['showtime'];
+                    ?>
+                    <option value="<?php echo htmlspecialchars($display_key); ?>" style="background: #2c3e50;" <?php echo $selected_movie == $display_key ? 'selected' : ''; ?>>
+                        <?php echo htmlspecialchars($movie['movie_name']); ?> - <?php echo date('h:i A', strtotime($movie['showtime'])); ?> (<?php echo date('M d, Y', strtotime($movie['show_date'])); ?>)
+                        <?php if ($is_today): ?>(Today)<?php endif; ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
@@ -153,6 +159,13 @@ $conn->close();
                 </button>
             </div>
         </form>
+        <?php if (empty($movies)): ?>
+        <div style="margin-top: 15px; padding: 12px; background: rgba(241, 196, 15, 0.1); border-left: 4px solid #f39c12; border-radius: 5px;">
+            <p style="color: #f39c12; font-size: 0.9rem;">
+                <i class="fas fa-info-circle"></i> No verified bookings found. Customers need to check in first before tickets can be printed.
+            </p>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- Tickets Display -->
@@ -161,14 +174,14 @@ $conn->close();
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
                 <h3 style="color: #2ecc71; font-size: 1.3rem;">
                     <i class="fas fa-check-circle"></i> Verified Tickets - <?php echo htmlspecialchars($selected_movie_title); ?>
-                    <span style="font-size: 0.9rem; color: #3498db; margin-left: 10px;"><?php echo date('F d, Y'); ?> | <?php echo date('h:i A', strtotime($selected_show_time)); ?></span>
+                    <span style="font-size: 0.9rem; color: #3498db; margin-left: 10px;"><?php echo date('F d, Y', strtotime($selected_show_date)); ?> | <?php echo date('h:i A', strtotime($selected_show_time)); ?></span>
                 </h3>
                 <button onclick="printAllTickets()" style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">
                     <i class="fas fa-print"></i> Print All Tickets
                 </button>
             </div>
             
-            <!-- Hand Mark Sample / Visual Guide - UPDATED with movie title and time -->
+            <!-- Hand Mark Sample / Visual Guide -->
             <div style="background: rgba(46, 204, 113, 0.1); border: 2px solid #2ecc71; border-radius: 15px; padding: 20px; margin-bottom: 25px;">
                 <div style="display: flex; align-items: center; gap: 25px; flex-wrap: wrap;">
                     <!-- Hand Mark Stamp Sample -->
@@ -289,7 +302,7 @@ $conn->close();
     <?php elseif ($selected_movie): ?>
         <div style="text-align: center; padding: 50px; background: rgba(0,0,0,0.2); border-radius: 10px;">
             <i class="fas fa-check-circle fa-3x" style="color: rgba(46,204,113,0.3); margin-bottom: 15px;"></i>
-            <p style="color: rgba(255,255,255,0.6);">No verified tickets found for this movie.</p>
+            <p style="color: rgba(255,255,255,0.6);">No verified tickets found for this movie showtime.</p>
             <p style="color: rgba(255,255,255,0.4); font-size: 0.9rem;">Only customers who have checked in (Present status) will appear here.</p>
         </div>
     <?php elseif (!empty($movies)): ?>
@@ -300,7 +313,7 @@ $conn->close();
     <?php else: ?>
         <div style="text-align: center; padding: 40px; background: rgba(0,0,0,0.2); border-radius: 10px;">
             <i class="fas fa-ticket-alt fa-3x" style="color: #f39c12; margin-bottom: 15px;"></i>
-            <p style="color: rgba(255,255,255,0.7);">No verified tickets available for today.</p>
+            <p style="color: rgba(255,255,255,0.7);">No verified tickets available.</p>
             <p style="color: rgba(255,255,255,0.4); font-size: 0.9rem;">Customers need to check in first before tickets can be printed.</p>
         </div>
     <?php endif; ?>
@@ -355,6 +368,14 @@ $conn->close();
     box-shadow: 0 8px 25px rgba(0,0,0,0.3);
 }
 
+.refresh-btn {
+    transition: all 0.3s ease;
+}
+
+.refresh-btn:hover {
+    transform: rotate(180deg);
+}
+
 @media (max-width: 768px) {
     .ticket-card {
         min-width: 100%;
@@ -394,6 +415,11 @@ select:hover, button:hover {
 </style>
 
 <script>
+// Refresh page function
+function refreshPage() {
+    location.reload();
+}
+
 function printAllTickets() {
     window.print();
 }
@@ -476,6 +502,14 @@ function printCustomerTickets(bookingRef) {
 document.getElementById('movieSelect')?.addEventListener('change', function() {
     if (this.value) {
         this.form.submit();
+    }
+});
+
+// Keyboard shortcut for refresh (Ctrl+R)
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+        e.preventDefault();
+        refreshPage();
     }
 });
 </script>

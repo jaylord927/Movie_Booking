@@ -19,55 +19,6 @@ $selected_movie_title = '';
 $selected_show_date = '';
 $selected_show_time = '';
 
-// Handle AJAX check-in request FIRST before any output
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
-    header('Content-Type: application/json');
-    
-    if (isset($_POST['action']) && $_POST['action'] === 'check_in' && isset($_POST['booking_id'])) {
-        $booking_id = intval($_POST['booking_id']);
-        
-        $check_stmt = $conn->prepare("
-            SELECT attendance_status, payment_status FROM tbl_booking WHERE b_id = ?
-        ");
-        $check_stmt->bind_param("i", $booking_id);
-        $check_stmt->execute();
-        $check_result = $check_stmt->get_result();
-        $booking_check = $check_result->fetch_assoc();
-        $check_stmt->close();
-        
-        if ($booking_check && $booking_check['payment_status'] == 'Paid' && $booking_check['attendance_status'] == 'Pending') {
-            $update_stmt = $conn->prepare("
-                UPDATE tbl_booking 
-                SET attendance_status = 'Present', verified_at = NOW(), verified_by = ?
-                WHERE b_id = ?
-            ");
-            $update_stmt->bind_param("ii", $staff_id, $booking_id);
-            
-            if ($update_stmt->execute()) {
-                $log_stmt = $conn->prepare("
-                    INSERT INTO staff_activity_log (staff_id, action, booking_id, details)
-                    VALUES (?, 'CHECK_IN', ?, ?)
-                ");
-                $details = "Checked in customer";
-                $log_stmt->bind_param("iis", $staff_id, $booking_id, $details);
-                $log_stmt->execute();
-                $log_stmt->close();
-                
-                echo json_encode(['success' => true, 'message' => 'Customer checked in successfully!']);
-                exit();
-            } else {
-                echo json_encode(['success' => false, 'message' => 'Database error: ' . $update_stmt->error]);
-                exit();
-            }
-            $update_stmt->close();
-        } else {
-            echo json_encode(['success' => false, 'message' => 'Booking cannot be checked in. Already verified or not paid.']);
-            exit();
-        }
-    }
-    exit();
-}
-
 // Get current date and time for 24-hour window
 $now = date('Y-m-d H:i:s');
 $next_24_hours = date('Y-m-d H:i:s', strtotime('+24 hours'));
@@ -131,14 +82,74 @@ if ($selected_movie) {
     $bookings_stmt->close();
 }
 
+// Handle AJAX check-in request
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
+    header('Content-Type: application/json');
+    
+    if (isset($_POST['action']) && $_POST['action'] === 'check_in' && isset($_POST['booking_id'])) {
+        $booking_id = intval($_POST['booking_id']);
+        
+        $check_stmt = $conn->prepare("
+            SELECT attendance_status, payment_status, booking_reference FROM tbl_booking WHERE b_id = ?
+        ");
+        $check_stmt->bind_param("i", $booking_id);
+        $check_stmt->execute();
+        $check_result = $check_stmt->get_result();
+        $booking_check = $check_result->fetch_assoc();
+        $check_stmt->close();
+        
+        if ($booking_check && $booking_check['payment_status'] == 'Paid' && $booking_check['attendance_status'] == 'Pending') {
+            $update_stmt = $conn->prepare("
+                UPDATE tbl_booking 
+                SET attendance_status = 'Present', verified_at = NOW(), verified_by = ?
+                WHERE b_id = ?
+            ");
+            $update_stmt->bind_param("ii", $staff_id, $booking_id);
+            
+            if ($update_stmt->execute()) {
+                $log_stmt = $conn->prepare("
+                    INSERT INTO staff_activity_log (staff_id, action, booking_id, details)
+                    VALUES (?, 'CHECK_IN', ?, ?)
+                ");
+                $details = "Checked in customer";
+                $log_stmt->bind_param("iis", $staff_id, $booking_id, $details);
+                $log_stmt->execute();
+                $log_stmt->close();
+                
+                echo json_encode([
+                    'success' => true, 
+                    'message' => '✓ Successfully verified! Customer can now enter the cinema.',
+                    'booking_ref' => $booking_check['booking_reference']
+                ]);
+                exit();
+            } else {
+                echo json_encode(['success' => false, 'message' => 'Failed to update booking status. Please try again.']);
+                exit();
+            }
+            $update_stmt->close();
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Booking already verified or payment not confirmed.']);
+            exit();
+        }
+    }
+    exit();
+}
+
 $conn->close();
 ?>
 
 <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 30px; border: 1px solid rgba(52, 152, 219, 0.2);">
-    <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; display: flex; align-items: center; gap: 10px;">
-        <i class="fas fa-search"></i> Verify Bookings
-    </h2>
-    <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 25px;">Select a movie to view and verify paid bookings (showing only showtimes within the next 24 hours)</p>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+        <div>
+            <h2 style="color: white; font-size: 1.8rem; display: flex; align-items: center; gap: 10px;">
+                <i class="fas fa-search"></i> Verify Bookings
+            </h2>
+            <p style="color: rgba(255, 255, 255, 0.7); margin-top: 5px;">Select a movie to view and verify paid bookings (showing only showtimes within the next 24 hours)</p>
+        </div>
+        <button onclick="refreshPage()" style="background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+            <i class="fas fa-sync-alt"></i> Refresh Page
+        </button>
+    </div>
 
     <?php if ($error): ?>
         <div style="background: rgba(231, 76, 60, 0.2); color: #ff9999; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; border: 1px solid rgba(231, 76, 60, 0.3);">
@@ -364,6 +375,14 @@ select:focus, input:focus {
     color: white;
 }
 
+.refresh-btn {
+    transition: all 0.3s ease;
+}
+
+.refresh-btn:hover {
+    transform: rotate(180deg);
+}
+
 @media (max-width: 768px) {
     table {
         font-size: 0.8rem;
@@ -376,6 +395,11 @@ select:focus, input:focus {
 </style>
 
 <script>
+// Refresh page function
+function refreshPage() {
+    location.reload();
+}
+
 // Auto-submit when movie selection changes
 document.getElementById('movieSelect')?.addEventListener('change', function() {
     if (this.value) {
@@ -433,7 +457,7 @@ function viewBookingDetails(button) {
         <div style="background: rgba(0,0,0,0.3); border-radius: 10px; padding: 20px;">
             <div class="receipt-detail-row">
                 <span class="receipt-label">Booking Reference:</span>
-                <span class="receipt-value">${bookingData.booking_ref}</span>
+                <span class="receipt-value">${escapeHtml(bookingData.booking_ref)}</span>
             </div>
             <div class="receipt-detail-row">
                 <span class="receipt-label">Customer Name:</span>
@@ -519,8 +543,8 @@ async function markAsPresent(button) {
         try {
             result = JSON.parse(text);
         } catch (e) {
-            console.error('Invalid JSON response:', text);
-            showToast('error', 'Server returned an invalid response. Check console for details.');
+            console.error('Parse error:', text);
+            showToast('error', 'An error occurred. Please try again or use the refresh button.');
             button.disabled = false;
             button.innerHTML = '<i class="fas fa-check"></i> Mark Present';
             return;
@@ -540,27 +564,23 @@ async function markAsPresent(button) {
             // Update dataset status
             row.dataset.attendanceStatus = 'Present';
             
-            showToast('success', `Customer "${customerName}" checked in successfully! Physical ticket issued.`);
+            // Show success message
+            showToast('success', result.message || `✓ Successfully verified ${customerName}! Customer can now enter.`);
             
-            // Update filter count (optional)
-            updateFilterCount();
+            // Auto refresh after 2 seconds
+            setTimeout(() => {
+                refreshPage();
+            }, 1500);
         } else {
-            showToast('error', result.message || 'Failed to check in customer.');
+            showToast('error', result.message || 'Verification failed. Please try again.');
             button.disabled = false;
             button.innerHTML = '<i class="fas fa-check"></i> Mark Present';
         }
     } catch (error) {
         console.error('Error:', error);
-        showToast('error', 'An error occurred. Please try again.');
+        showToast('error', 'Connection error. Please check your internet and try again.');
         button.disabled = false;
         button.innerHTML = '<i class="fas fa-check"></i> Mark Present';
-    }
-}
-
-function updateFilterCount() {
-    const visibleRows = Array.from(document.querySelectorAll('.booking-row')).filter(row => row.style.display !== 'none');
-    if (filterCount) {
-        filterCount.textContent = visibleRows.length;
     }
 }
 
@@ -590,5 +610,16 @@ window.onclick = function(event) {
         closeDetailsModal();
     }
 }
+
+// Refresh button with keyboard shortcut (Ctrl+R)
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+        e.preventDefault();
+        refreshPage();
+    }
+    if (e.key === 'Escape') {
+        closeDetailsModal();
+    }
+});
 </script>
 

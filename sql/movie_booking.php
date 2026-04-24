@@ -1,14 +1,20 @@
+-- =====================================================
+-- DATABASE: movie_booking
+-- =====================================================
+
 CREATE DATABASE IF NOT EXISTS movie_booking;
 USE movie_booking;
 
--- Users table
+-- =====================================================
+-- 1. USERS TABLE (Updated with Staff role)
+-- =====================================================
 CREATE TABLE IF NOT EXISTS users (
     u_id INT AUTO_INCREMENT PRIMARY KEY,
     u_name VARCHAR(100) NOT NULL,
     u_username VARCHAR(50) UNIQUE NOT NULL,
     u_email VARCHAR(100) UNIQUE NOT NULL,
     u_pass VARCHAR(255) NOT NULL,
-    u_role ENUM('Admin', 'Customer', 'Owner') DEFAULT 'Customer',  
+    u_role ENUM('Admin', 'Customer', 'Owner', 'Staff') DEFAULT 'Customer',
     u_status ENUM('Active', 'Inactive') DEFAULT 'Active',
     created_by INT NULL,
     created_by_name VARCHAR(100) NULL,
@@ -18,7 +24,9 @@ CREATE TABLE IF NOT EXISTS users (
     FOREIGN KEY (created_by) REFERENCES users(u_id) ON DELETE SET NULL
 );
 
--- Movies table with venue fields and seat pricing
+-- =====================================================
+-- 2. MOVIES TABLE (Updated with venue_photo_path)
+-- =====================================================
 CREATE TABLE IF NOT EXISTS movies (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
@@ -32,6 +40,7 @@ CREATE TABLE IF NOT EXISTS movies (
     venue_name VARCHAR(255),
     venue_location VARCHAR(500),
     google_maps_link VARCHAR(500),
+    venue_photo_path VARCHAR(500) NULL,
     standard_price DECIMAL(10,2) DEFAULT 350.00,
     premium_price DECIMAL(10,2) DEFAULT 450.00,
     sweet_spot_price DECIMAL(10,2) DEFAULT 550.00,
@@ -44,7 +53,9 @@ CREATE TABLE IF NOT EXISTS movies (
     FOREIGN KEY (updated_by) REFERENCES users(u_id) ON DELETE SET NULL
 );
 
--- Movie schedules table
+-- =====================================================
+-- 3. MOVIE SCHEDULES TABLE
+-- =====================================================
 CREATE TABLE IF NOT EXISTS movie_schedules (
     id INT AUTO_INCREMENT PRIMARY KEY,
     movie_id INT NOT NULL,
@@ -58,7 +69,9 @@ CREATE TABLE IF NOT EXISTS movie_schedules (
     FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
 );
 
--- Bookings table
+-- =====================================================
+-- 4. BOOKINGS TABLE (Updated with QR code & attendance)
+-- =====================================================
 CREATE TABLE IF NOT EXISTS tbl_booking (
     b_id INT AUTO_INCREMENT PRIMARY KEY,
     u_id INT NOT NULL,
@@ -69,17 +82,27 @@ CREATE TABLE IF NOT EXISTS tbl_booking (
     status ENUM('Ongoing', 'Done', 'Cancelled') DEFAULT 'Ongoing',
     booking_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     payment_status ENUM('Pending', 'Paid', 'Refunded', 'Pending Verification') DEFAULT 'Pending',
+    attendance_status ENUM('Pending', 'Present', 'Completed') DEFAULT 'Pending',
     is_visible TINYINT(1) DEFAULT 1,
     booking_reference VARCHAR(20) UNIQUE,
+    qr_code VARCHAR(255) NULL,
+    verified_at TIMESTAMP NULL,
+    verified_by INT NULL,
     FOREIGN KEY (u_id) REFERENCES users(u_id) ON DELETE CASCADE,
+    FOREIGN KEY (verified_by) REFERENCES users(u_id) ON DELETE SET NULL,
     INDEX idx_user_id (u_id),
     INDEX idx_booking_reference (booking_reference),
     INDEX idx_status (status),
     INDEX idx_payment_status (payment_status),
+    INDEX idx_attendance_status (attendance_status),
     INDEX idx_show_date (show_date),
-    INDEX idx_is_visible (is_visible)
+    INDEX idx_is_visible (is_visible),
+    INDEX idx_qr_code (qr_code)
 );
 
+-- =====================================================
+-- 5. BOOKED SEATS TABLE
+-- =====================================================
 CREATE TABLE IF NOT EXISTS booked_seats (
     id INT AUTO_INCREMENT PRIMARY KEY,
     booking_id INT NOT NULL,
@@ -92,7 +115,9 @@ CREATE TABLE IF NOT EXISTS booked_seats (
     INDEX idx_seat_number (seat_number)
 );
 
--- Seat availability table
+-- =====================================================
+-- 6. SEAT AVAILABILITY TABLE
+-- =====================================================
 CREATE TABLE IF NOT EXISTS seat_availability (
     id INT AUTO_INCREMENT PRIMARY KEY,
     schedule_id INT NOT NULL,
@@ -107,7 +132,9 @@ CREATE TABLE IF NOT EXISTS seat_availability (
     FOREIGN KEY (schedule_id) REFERENCES movie_schedules(id) ON DELETE CASCADE
 );
 
--- Create admin activity log table
+-- =====================================================
+-- 7. ADMIN ACTIVITY LOG
+-- =====================================================
 CREATE TABLE IF NOT EXISTS admin_activity_log (
     id INT AUTO_INCREMENT PRIMARY KEY,
     admin_id INT NOT NULL,
@@ -119,6 +146,9 @@ CREATE TABLE IF NOT EXISTS admin_activity_log (
     FOREIGN KEY (admin_id) REFERENCES users(u_id) ON DELETE CASCADE
 );
 
+-- =====================================================
+-- 8. CUSTOMER ACTIVITY LOG
+-- =====================================================
 CREATE TABLE IF NOT EXISTS customer_activity_log (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NOT NULL,
@@ -134,6 +164,23 @@ CREATE TABLE IF NOT EXISTS customer_activity_log (
     FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE SET NULL
 );
 
+-- =====================================================
+-- 9. STAFF ACTIVITY LOG (NEW)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS staff_activity_log (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    booking_id INT NULL,
+    details TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (staff_id) REFERENCES users(u_id) ON DELETE CASCADE,
+    FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE SET NULL
+);
+
+-- =====================================================
+-- 10. SUGGESTIONS TABLE
+-- =====================================================
 CREATE TABLE IF NOT EXISTS suggestions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NULL,
@@ -146,6 +193,9 @@ CREATE TABLE IF NOT EXISTS suggestions (
     FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE SET NULL
 );
 
+-- =====================================================
+-- 11. PAYMENT METHODS TABLE
+-- =====================================================
 CREATE TABLE IF NOT EXISTS payment_methods (
     id INT AUTO_INCREMENT PRIMARY KEY,
     method_name VARCHAR(50) NOT NULL,
@@ -159,7 +209,9 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Manual Payments Table
+-- =====================================================
+-- 12. MANUAL PAYMENTS TABLE
+-- =====================================================
 CREATE TABLE IF NOT EXISTS manual_payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     booking_id INT NOT NULL,
@@ -179,7 +231,9 @@ CREATE TABLE IF NOT EXISTS manual_payments (
     FOREIGN KEY (verified_by) REFERENCES users(u_id) ON DELETE SET NULL
 );
 
--- PayMongo Payments Table 
+-- =====================================================
+-- 13. PAYMONGO PAYMENTS TABLE
+-- =====================================================
 CREATE TABLE IF NOT EXISTS paymongo_payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     booking_id INT NOT NULL,

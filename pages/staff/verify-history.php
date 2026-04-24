@@ -16,22 +16,26 @@ $selected_movie_title = '';
 $selected_show_date = '';
 $selected_show_time = '';
 
-// Get all movies that have verified bookings (Present or Completed)
+// Get all movies that have verified bookings (Present or Completed) - grouped by movie AND showtime
 $movies_list = [];
 
 $movies_stmt = $conn->prepare("
-    SELECT DISTINCT b.movie_name, b.showtime, b.show_date
+    SELECT DISTINCT 
+        b.movie_name, 
+        b.showtime, 
+        b.show_date,
+        CONCAT(b.movie_name, '|', b.show_date, '|', b.showtime) as unique_key
     FROM tbl_booking b
-    WHERE b.attendance_status IN ('Present', 'Completed') AND b.payment_status = 'Paid'
+    WHERE b.attendance_status IN ('Present', 'Completed') 
+    AND b.payment_status = 'Paid'
     ORDER BY b.show_date DESC, b.showtime DESC, b.movie_name
 ");
 $movies_stmt->execute();
 $movies_result = $movies_stmt->get_result();
 
 while ($row = $movies_result->fetch_assoc()) {
-    // Create unique identifier combining movie name, date, and showtime
-    $movie_key = $row['movie_name'] . '|' . $row['show_date'] . '|' . $row['showtime'];
-    $movies_list[$movie_key] = [
+    $unique_key = $row['unique_key'];
+    $movies_list[$unique_key] = [
         'movie_name' => $row['movie_name'],
         'showtime' => $row['showtime'],
         'show_date' => $row['show_date']
@@ -49,21 +53,29 @@ if ($selected_movie) {
     $selected_show_time = $selected_parts[2] ?? '';
     
     $bookings_stmt = $conn->prepare("
-        SELECT b.b_id, b.booking_reference, b.movie_name, b.show_date, b.showtime,
-               GROUP_CONCAT(bs.seat_number ORDER BY bs.seat_number SEPARATOR ', ') as seat_list,
-               COUNT(bs.id) as total_seats,
-               SUM(bs.price) as total_price,
-               u.u_name as customer_name,
-               u.u_email as customer_email,
-               b.attendance_status,
-               b.verified_at,
-               a.u_name as verified_by_name
+        SELECT 
+            b.b_id, 
+            b.booking_reference, 
+            b.movie_name, 
+            b.show_date, 
+            b.showtime,
+            GROUP_CONCAT(bs.seat_number ORDER BY bs.seat_number SEPARATOR ', ') as seat_list,
+            COUNT(bs.id) as total_seats,
+            SUM(bs.price) as total_price,
+            u.u_name as customer_name,
+            u.u_email as customer_email,
+            b.attendance_status,
+            b.verified_at,
+            a.u_name as verified_by_name
         FROM tbl_booking b
         LEFT JOIN booked_seats bs ON b.b_id = bs.booking_id
         LEFT JOIN users u ON b.u_id = u.u_id
         LEFT JOIN users a ON b.verified_by = a.u_id
-        WHERE b.movie_name = ? AND b.show_date = ? AND b.showtime = ? 
-        AND b.attendance_status IN ('Present', 'Completed') AND b.payment_status = 'Paid'
+        WHERE b.movie_name = ? 
+        AND b.show_date = ? 
+        AND b.showtime = ? 
+        AND b.attendance_status IN ('Present', 'Completed') 
+        AND b.payment_status = 'Paid'
         GROUP BY b.b_id
         ORDER BY b.booking_reference
     ");
@@ -81,12 +93,19 @@ $conn->close();
 ?>
 
 <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 30px; border: 1px solid rgba(52, 152, 219, 0.2);">
-    <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; display: flex; align-items: center; gap: 10px;">
-        <i class="fas fa-history"></i> Verified Bookings History
-    </h2>
-    <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 25px;">View all checked-in and completed bookings</p>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+        <div>
+            <h2 style="color: white; font-size: 1.8rem; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                <i class="fas fa-history"></i> Verified Bookings History
+            </h2>
+            <p style="color: rgba(255, 255, 255, 0.7);">View all checked-in and completed bookings</p>
+        </div>
+        <button onclick="refreshPage()" style="background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+            <i class="fas fa-sync-alt"></i> Refresh Page
+        </button>
+    </div>
 
-    <!-- Movie Selection - Auto-submit on change -->
+    <!-- Movie Selection -->
     <div style="background: rgba(0, 0, 0, 0.2); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
         <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px;">
             <i class="fas fa-film"></i> Select Movie & Showtime
@@ -98,13 +117,13 @@ $conn->close();
                     <option value="" style="background: #2c3e50;">-- Select a movie --</option>
                     <?php 
                     // Sort movies by date and time (newest first)
-                    usort($movies_list, function($a, $b) {
+                    uasort($movies_list, function($a, $b) {
                         $dateTimeA = strtotime($a['show_date'] . ' ' . $a['showtime']);
                         $dateTimeB = strtotime($b['show_date'] . ' ' . $b['showtime']);
                         return $dateTimeB - $dateTimeA;
                     });
                     
-                    foreach ($movies_list as $key => $movie): 
+                    foreach ($movies_list as $unique_key => $movie): 
                         $display_key = $movie['movie_name'] . '|' . $movie['show_date'] . '|' . $movie['showtime'];
                         $is_today = date('Y-m-d') == $movie['show_date'];
                         $show_datetime = strtotime($movie['show_date'] . ' ' . $movie['showtime']);
@@ -112,14 +131,13 @@ $conn->close();
                     ?>
                     <option value="<?php echo htmlspecialchars($display_key); ?>" style="background: #2c3e50;" <?php echo $selected_movie == $display_key ? 'selected' : ''; ?>>
                         <?php echo htmlspecialchars($movie['movie_name']); ?> - <?php echo date('h:i A', strtotime($movie['showtime'])); ?> (<?php echo date('M d, Y', strtotime($movie['show_date'])); ?>)
-                        <?php if ($is_today): ?>
-                        (Today)
-                        <?php elseif ($is_past): ?>
-                        (Past)
-                        <?php endif; ?>
+                        <?php if ($is_today): ?>(Today)<?php elseif ($is_past): ?>(Past)<?php endif; ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
+                <button type="submit" style="padding: 14px 30px; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; border: none; border-radius: 10px; font-weight: 600; cursor: pointer;">
+                    <i class="fas fa-search"></i> Load History
+                </button>
             </div>
         </form>
         
@@ -176,15 +194,20 @@ $conn->close();
                         <?php foreach ($verified_bookings as $booking): 
                             $status_text = $booking['attendance_status'] == 'Present' ? 'Present' : 'Completed';
                             $status_color = $booking['attendance_status'] == 'Present' ? '#2ecc71' : '#3498db';
-                            $row_data = [
-                                'ref' => strtolower($booking['booking_reference']),
-                                'customer' => strtolower($booking['customer_name']),
-                                'seats' => strtolower($booking['seat_list'] ?? '')
-                            ];
                         ?>
-                        <tr class="booking-row" data-ref="<?php echo $row_data['ref']; ?>" 
-                            data-customer="<?php echo $row_data['customer']; ?>"
-                            data-seats="<?php echo $row_data['seats']; ?>"
+                        <tr class="booking-row" 
+                            data-booking-id="<?php echo $booking['b_id']; ?>"
+                            data-booking-ref="<?php echo $booking['booking_reference']; ?>"
+                            data-customer-name="<?php echo htmlspecialchars($booking['customer_name']); ?>"
+                            data-customer-email="<?php echo htmlspecialchars($booking['customer_email']); ?>"
+                            data-movie-name="<?php echo htmlspecialchars($booking['movie_name']); ?>"
+                            data-show-date="<?php echo $booking['show_date']; ?>"
+                            data-show-time="<?php echo date('h:i A', strtotime($booking['showtime'])); ?>"
+                            data-seat-list="<?php echo htmlspecialchars($booking['seat_list'] ?? 'N/A'); ?>"
+                            data-total-seats="<?php echo $booking['total_seats']; ?>"
+                            data-total-amount="<?php echo number_format($booking['total_price'] ?? 0, 2); ?>"
+                            data-verified-at="<?php echo $booking['verified_at']; ?>"
+                            data-verified-by="<?php echo htmlspecialchars($booking['verified_by_name'] ?? 'System'); ?>"
                             style="border-bottom: 1px solid rgba(255,255,255,0.1);">
                             <td style="padding: 12px; color: white; font-weight: 600;"><?php echo $booking['booking_reference']; ?></td>
                             <td style="padding: 12px; color: white;"><?php echo htmlspecialchars($booking['customer_name']); ?></td>
@@ -198,7 +221,7 @@ $conn->close();
                             <td style="padding: 12px; color: rgba(255,255,255,0.7);"><?php echo date('M d, h:i A', strtotime($booking['verified_at'])); ?></td>
                             <td style="padding: 12px; color: #2ecc71;"><?php echo htmlspecialchars($booking['verified_by_name'] ?? 'System'); ?></td>
                             <td style="padding: 12px;">
-                                <button onclick="viewDetails(<?php echo $booking['b_id']; ?>)" 
+                                <button onclick="viewBookingDetails(this)" class="btn-view-details" 
                                         style="background: #3498db; color: white; border: none; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 0.8rem;">
                                     <i class="fas fa-eye"></i> View Details
                                 </button>
@@ -230,7 +253,7 @@ $conn->close();
 <div id="detailsModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 1000; justify-content: center; align-items: center; padding: 20px; overflow-y: auto;">
     <div style="background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%); border-radius: 20px; padding: 30px; max-width: 700px; width: 100%; border: 2px solid #3498db;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2 style="color: #3498db;">Booking Details</h2>
+            <h2 style="color: #3498db;"><i class="fas fa-receipt"></i> Booking Receipt Details</h2>
             <button onclick="closeDetailsModal()" style="background: none; border: none; color: white; font-size: 2rem; cursor: pointer;">&times;</button>
         </div>
         <div id="detailsModalContent"></div>
@@ -265,6 +288,30 @@ select:focus, input:focus {
     box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.2);
 }
 
+.receipt-detail-row {
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.receipt-label {
+    color: #3498db;
+    font-weight: 600;
+    min-width: 140px;
+    display: inline-block;
+}
+
+.receipt-value {
+    color: white;
+}
+
+.refresh-btn {
+    transition: all 0.3s ease;
+}
+
+.refresh-btn:hover {
+    transform: rotate(180deg);
+}
+
 @media (max-width: 768px) {
     table {
         font-size: 0.8rem;
@@ -277,6 +324,11 @@ select:focus, input:focus {
 </style>
 
 <script>
+// Refresh page function
+function refreshPage() {
+    location.reload();
+}
+
 // Auto-submit when movie selection changes
 document.getElementById('movieSelect')?.addEventListener('change', function() {
     if (this.value) {
@@ -295,9 +347,9 @@ if (liveSearch) {
         let visibleCount = 0;
         
         bookingRows.forEach(row => {
-            const ref = row.dataset.ref || '';
-            const customer = row.dataset.customer || '';
-            const seats = row.dataset.seats || '';
+            const ref = row.querySelector('td:first-child')?.innerText.toLowerCase() || '';
+            const customer = row.querySelector('td:nth-child(2)')?.innerText.toLowerCase() || '';
+            const seats = row.querySelector('td:nth-child(3)')?.innerText.toLowerCase() || '';
             
             if (ref.includes(searchTerm) || customer.includes(searchTerm) || seats.includes(searchTerm) || searchTerm === '') {
                 row.style.display = '';
@@ -313,46 +365,91 @@ if (liveSearch) {
     });
 }
 
-function viewDetails(bookingId) {
-    fetch('<?php echo SITE_URL; ?>ajax/get-booking-details.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: 'booking_id=' + bookingId
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const modalContent = document.getElementById('detailsModalContent');
-            modalContent.innerHTML = `
-                <div style="background: rgba(0,0,0,0.3); border-radius: 10px; padding: 20px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                        <div><strong style="color: #3498db;">Booking Reference:</strong><br><span style="color: white;">${data.booking_reference}</span></div>
-                        <div><strong style="color: #3498db;">Customer Name:</strong><br><span style="color: white;">${data.customer_name}</span></div>
-                        <div><strong style="color: #3498db;">Customer Email:</strong><br><span style="color: white;">${data.customer_email}</span></div>
-                        <div><strong style="color: #3498db;">Movie:</strong><br><span style="color: white;">${data.movie_name}</span></div>
-                        <div><strong style="color: #3498db;">Show Date:</strong><br><span style="color: white;">${data.show_date}</span></div>
-                        <div><strong style="color: #3498db;">Show Time:</strong><br><span style="color: white;">${data.show_time}</span></div>
-                        <div><strong style="color: #3498db;">Selected Seats:</strong><br><span style="color: #2ecc71; font-weight: 600;">${data.seat_list}</span></div>
-                        <div><strong style="color: #3498db;">Total Seats:</strong><br><span style="color: white;">${data.total_seats}</span></div>
-                        <div><strong style="color: #3498db;">Total Amount:</strong><br><span style="color: #2ecc71; font-weight: 800; font-size: 1.2rem;">₱${parseFloat(data.booking_fee).toFixed(2)}</span></div>
-                        <div><strong style="color: #3498db;">Payment Status:</strong><br><span style="color: #2ecc71;">✓ Paid</span></div>
-                        <div><strong style="color: #3498db;">Attendance Status:</strong><br><span style="color: ${data.attendance_status === 'Present' ? '#2ecc71' : '#3498db'};">${data.attendance_status === 'Present' ? '✓ Present' : '✓ Completed'}</span></div>
-                        ${data.verified_at ? `<div><strong style="color: #3498db;">Verified At:</strong><br><span style="color: white;">${new Date(data.verified_at).toLocaleString()}</span></div>` : ''}
-                        ${data.verified_by ? `<div><strong style="color: #3498db;">Verified By:</strong><br><span style="color: #2ecc71;">${data.verified_by}</span></div>` : ''}
-                    </div>
-                </div>
-            `;
-            document.getElementById('detailsModal').style.display = 'flex';
-        } else {
-            alert('Error: ' + data.message);
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Failed to fetch booking details');
-    });
+// View Booking Details - Shows receipt-like information
+function viewBookingDetails(button) {
+    const row = button.closest('tr');
+    
+    const bookingData = {
+        booking_ref: row.dataset.bookingRef,
+        customer_name: row.dataset.customerName,
+        customer_email: row.dataset.customerEmail,
+        movie_name: row.dataset.movieName,
+        show_date: row.dataset.showDate,
+        show_time: row.dataset.showTime,
+        seat_list: row.dataset.seatList,
+        total_seats: row.dataset.totalSeats,
+        total_amount: row.dataset.totalAmount,
+        verified_at: row.dataset.verifiedAt,
+        verified_by: row.dataset.verifiedBy
+    };
+    
+    const modalContent = document.getElementById('detailsModalContent');
+    modalContent.innerHTML = `
+        <div style="background: rgba(0,0,0,0.3); border-radius: 10px; padding: 20px;">
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Booking Reference:</span>
+                <span class="receipt-value">${escapeHtml(bookingData.booking_ref)}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Customer Name:</span>
+                <span class="receipt-value">${escapeHtml(bookingData.customer_name)}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Customer Email:</span>
+                <span class="receipt-value">${escapeHtml(bookingData.customer_email)}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Movie:</span>
+                <span class="receipt-value">${escapeHtml(bookingData.movie_name)}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Show Date:</span>
+                <span class="receipt-value">${new Date(bookingData.show_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Show Time:</span>
+                <span class="receipt-value">${bookingData.show_time}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Selected Seats:</span>
+                <span class="receipt-value" style="color: #2ecc71; font-weight: 600;">${escapeHtml(bookingData.seat_list)}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Total Seats:</span>
+                <span class="receipt-value">${bookingData.total_seats} seat(s)</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Total Amount Paid:</span>
+                <span class="receipt-value" style="color: #2ecc71; font-weight: 800; font-size: 1.2rem;">₱${bookingData.total_amount}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Payment Status:</span>
+                <span class="receipt-value" style="color: #2ecc71;">✓ Paid</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Attendance Status:</span>
+                <span class="receipt-value" style="color: #2ecc71;">✓ Verified</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Verified At:</span>
+                <span class="receipt-value">${new Date(bookingData.verified_at).toLocaleString()}</span>
+            </div>
+            <div class="receipt-detail-row">
+                <span class="receipt-label">Verified By:</span>
+                <span class="receipt-value" style="color: #2ecc71;">${escapeHtml(bookingData.verified_by)}</span>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('detailsModal').style.display = 'flex';
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function closeDetailsModal() {
@@ -362,6 +459,20 @@ function closeDetailsModal() {
 // Close modal when clicking outside
 window.onclick = function(event) {
     const detailsModal = document.getElementById('detailsModal');
-    if (event.target == detailsModal) closeDetailsModal();
+    if (event.target == detailsModal) {
+        closeDetailsModal();
+    }
 }
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+        e.preventDefault();
+        refreshPage();
+    }
+    if (e.key === 'Escape') {
+        closeDetailsModal();
+    }
+});
 </script>
+
