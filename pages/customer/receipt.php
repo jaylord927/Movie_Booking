@@ -19,6 +19,9 @@ if ($booking_id <= 0) {
 $conn = get_db();
 $user_id = $_SESSION['user_id'];
 
+// ============================================
+// UPDATED QUERY: Get booking with venue information from venues table (with fallback from movies)
+// ============================================
 $booking_stmt = $conn->prepare("
     SELECT 
         b.*,
@@ -34,12 +37,18 @@ $booking_stmt = $conn->prepare("
         m.duration,
         m.rating,
         m.title as movie_title,
-        m.venue_name,
-        m.venue_location
+        m.venue_id as movie_venue_id,
+        COALESCE(v.id, mv.id) as venue_id,
+        COALESCE(v.venue_name, mv.venue_name) as venue_name,
+        COALESCE(v.venue_location, mv.venue_location) as venue_location,
+        COALESCE(v.google_maps_link, mv.google_maps_link) as google_maps_link,
+        COALESCE(v.venue_photo_path, mv.venue_photo_path) as venue_photo_path
     FROM tbl_booking b
     JOIN users u ON b.u_id = u.u_id
     LEFT JOIN booked_seats bs ON b.b_id = bs.booking_id
     LEFT JOIN movies m ON b.movie_name = m.title
+    LEFT JOIN venues v ON b.venue_id = v.id
+    LEFT JOIN venues mv ON m.venue_id = mv.id
     WHERE b.b_id = ? AND b.u_id = ? AND b.payment_status = 'Paid'
     GROUP BY b.b_id
 ");
@@ -122,6 +131,10 @@ $conn->close();
             font-size: 2.2rem;
             margin-bottom: 5px;
             font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
         }
         
         .receipt-header p {
@@ -458,6 +471,67 @@ $conn->close();
             transform: translateY(-3px);
         }
         
+        /* Venue Section Styles */
+        .venue-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-left: 4px solid #e23020;
+        }
+        
+        .venue-section h4 {
+            color: #e23020;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .venue-details {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .venue-info {
+            flex: 2;
+        }
+        
+        .venue-photo {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .venue-photo img {
+            max-width: 100%;
+            max-height: 120px;
+            border-radius: 8px;
+            border: 2px solid rgba(226, 48, 32, 0.3);
+        }
+        
+        .venue-address {
+            color: #333;
+            margin-bottom: 10px;
+            line-height: 1.5;
+        }
+        
+        .venue-map-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #3498db;
+            text-decoration: none;
+            font-size: 0.9rem;
+            margin-top: 8px;
+        }
+        
+        .venue-map-link:hover {
+            text-decoration: underline;
+        }
+        
         @media print {
             .action-buttons, .qr-section .btn {
                 display: none;
@@ -496,6 +570,14 @@ $conn->close();
                 flex-direction: column;
                 text-align: center;
             }
+            
+            .venue-details {
+                flex-direction: column;
+            }
+            
+            .venue-photo {
+                order: -1;
+            }
         }
     </style>
 </head>
@@ -503,9 +585,11 @@ $conn->close();
     <div class="receipt-wrapper">
         <div class="receipt-container" id="receiptContent">
             <div class="receipt-header">
-                <h1>MOVIE TICKETING</h1>
-                <p>Book Your Favorite Movies</p>
-                <p style="margin-top: 5px;">Ward II, Minglanilla, Cebu</p>
+                <h1>
+                    <span>🎬</span>
+                    <span>MovieTicketBooking</span>
+                </h1>
+                <p>Ward II, Minglanilla, Cebu</p>
                 <p>09267630945 | BSIT@movieticketing.com</p>
             </div>
             
@@ -567,6 +651,7 @@ $conn->close();
                 </div>
                 
                 <div class="details-grid">
+                    <!-- Show Information Card -->
                     <div class="detail-card">
                         <h4><i class="fas fa-calendar-alt"></i> Show Information</h4>
                         <div class="detail-item">
@@ -579,6 +664,7 @@ $conn->close();
                         </div>
                     </div>
                     
+                    <!-- Seat Information Card -->
                     <div class="detail-card">
                         <h4><i class="fas fa-chair"></i> Seat Information</h4>
                         <div class="detail-item">
@@ -591,6 +677,7 @@ $conn->close();
                         </div>
                     </div>
                     
+                    <!-- Customer Information Card -->
                     <div class="detail-card">
                         <h4><i class="fas fa-user"></i> Customer Information</h4>
                         <div class="detail-item">
@@ -603,24 +690,60 @@ $conn->close();
                         </div>
                     </div>
                     
-                    <?php if (!empty($booking['venue_name']) || !empty($booking['venue_location'])): ?>
+                    <!-- Venue Information Card -->
+                    <?php if (!empty($booking['venue_name'])): ?>
                     <div class="detail-card">
                         <h4><i class="fas fa-map-marker-alt"></i> Venue Information</h4>
-                        <?php if (!empty($booking['venue_name'])): ?>
                         <div class="detail-item">
-                            <div class="label">Venue</div>
+                            <div class="label">Venue Name</div>
                             <div class="value"><?php echo htmlspecialchars($booking['venue_name']); ?></div>
                         </div>
-                        <?php endif; ?>
                         <?php if (!empty($booking['venue_location'])): ?>
                         <div class="detail-item">
                             <div class="label">Location</div>
                             <div class="value"><?php echo htmlspecialchars($booking['venue_location']); ?></div>
                         </div>
                         <?php endif; ?>
+                        <?php if (!empty($booking['google_maps_link'])): ?>
+                        <div class="detail-item">
+                            <div class="label">Directions</div>
+                            <div class="value">
+                                <a href="<?php echo htmlspecialchars($booking['google_maps_link']); ?>" target="_blank" 
+                                   style="color: #3498db; text-decoration: none; display: inline-flex; align-items: center; gap: 5px;">
+                                    <i class="fas fa-map-marked-alt"></i> Open in Google Maps
+                                </a>
+                            </div>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     <?php endif; ?>
                 </div>
+                
+                <!-- Optional: Venue Photo Display Section -->
+                <?php if (!empty($booking['venue_photo_path'])): ?>
+                <div class="venue-section">
+                    <h4><i class="fas fa-camera"></i> Venue Photo</h4>
+                    <div class="venue-details">
+                        <div class="venue-info">
+                            <p class="venue-address">
+                                <strong><?php echo htmlspecialchars($booking['venue_name']); ?></strong><br>
+                                <?php echo htmlspecialchars($booking['venue_location']); ?>
+                            </p>
+                            <?php if (!empty($booking['google_maps_link'])): ?>
+                            <a href="<?php echo htmlspecialchars($booking['google_maps_link']); ?>" target="_blank" class="venue-map-link">
+                                <i class="fas fa-map-marked-alt"></i> Get Directions
+                            </a>
+                            <?php endif; ?>
+                        </div>
+                        <div class="venue-photo">
+                            <img src="<?php echo SITE_URL . $booking['venue_photo_path']; ?>" 
+                                 alt="<?php echo htmlspecialchars($booking['venue_name']); ?> Photo"
+                                 onclick="window.open(this.src, '_blank')"
+                                 style="cursor: pointer;">
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
                 
                 <div class="price-summary">
                     <h4>PAYMENT SUMMARY</h4>
@@ -643,6 +766,9 @@ $conn->close();
                         <li>Keep your physical ticket for re-entry if you need to step out</li>
                         <li>Please arrive at least 30 minutes before the showtime</li>
                         <li>Latecomers may not be admitted</li>
+                        <?php if (!empty($booking['venue_name'])): ?>
+                        <li><strong>Venue:</strong> <?php echo htmlspecialchars($booking['venue_name']); ?> - <?php echo htmlspecialchars($booking['venue_location']); ?></li>
+                        <?php endif; ?>
                     </ul>
                 </div>
                 

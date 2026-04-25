@@ -105,7 +105,7 @@ if ($auto_cancel_result->num_rows > 0) {
 }
 $auto_cancel_stmt->close();
 
-// Mark shows as expired if showtime has passed
+// Mark shows as expired if showtime has passed (for both paid and unpaid)
 $expire_shows_stmt = $conn->prepare("
     UPDATE tbl_booking 
     SET status = 'Done' 
@@ -116,6 +116,18 @@ $expire_shows_stmt->bind_param("i", $user_id);
 $expire_shows_stmt->execute();
 $expire_shows_stmt->close();
 
+// For paid bookings that have finished, also mark attendance as Completed
+$complete_paid_shows_stmt = $conn->prepare("
+    UPDATE tbl_booking 
+    SET attendance_status = 'Completed', status = 'Done'
+    WHERE u_id = ? AND payment_status = 'Paid' AND attendance_status != 'Completed'
+    AND CONCAT(show_date, ' ', showtime) < NOW()
+");
+$complete_paid_shows_stmt->bind_param("i", $user_id);
+$complete_paid_shows_stmt->execute();
+$complete_paid_shows_stmt->close();
+
+// Cancel booking if requested
 if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
     $booking_id = intval($_GET['cancel']);
     
@@ -210,6 +222,7 @@ if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
     $check_stmt->close();
 }
 
+// Remove booking from view
 if (isset($_GET['remove']) && is_numeric($_GET['remove'])) {
     $booking_id = intval($_GET['remove']);
     
@@ -237,6 +250,9 @@ if (isset($_GET['remove']) && is_numeric($_GET['remove'])) {
     $check_stmt->close();
 }
 
+// ============================================
+// UPDATED QUERY: Get bookings with venue information (with fallback from movies)
+// ============================================
 $bookings_stmt = $conn->prepare("
     SELECT 
         b.*,
@@ -252,6 +268,12 @@ $bookings_stmt = $conn->prepare("
         m.standard_price,
         m.premium_price,
         m.sweet_spot_price,
+        m.venue_id as movie_venue_id,
+        COALESCE(v.id, mv.id) as venue_id,
+        COALESCE(v.venue_name, mv.venue_name) as venue_name,
+        COALESCE(v.venue_location, mv.venue_location) as venue_location,
+        COALESCE(v.google_maps_link, mv.google_maps_link) as google_maps_link,
+        COALESCE(v.venue_photo_path, mv.venue_photo_path) as venue_photo_path,
         TIMESTAMPDIFF(HOUR, b.booking_date, NOW()) as hours_since_booking,
         TIMESTAMPDIFF(HOUR, NOW(), CONCAT(b.show_date, ' ', b.showtime)) as hours_until_show,
         TIMESTAMPDIFF(MINUTE, NOW(), CONCAT(b.show_date, ' ', b.showtime)) as minutes_until_show,
@@ -267,6 +289,8 @@ $bookings_stmt = $conn->prepare("
     FROM tbl_booking b
     LEFT JOIN booked_seats bs ON b.b_id = bs.booking_id
     LEFT JOIN movies m ON b.movie_name = m.title
+    LEFT JOIN venues v ON b.venue_id = v.id
+    LEFT JOIN venues mv ON m.venue_id = mv.id
     WHERE b.u_id = ? AND (b.is_visible = 1 OR b.is_visible IS NULL)
     GROUP BY b.b_id
     ORDER BY 
@@ -312,6 +336,7 @@ require_once $root_dir . '/partials/header.php';
 ?>
 
 <div class="main-container" style="max-width: 1400px; margin: 0 auto; padding: 20px;">
+    <!-- Header Section -->
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
          border-radius: 15px; padding: 25px; margin-bottom: 30px; 
          border: 1px solid rgba(226, 48, 32, 0.3);">
@@ -356,6 +381,7 @@ require_once $root_dir . '/partials/header.php';
         </div>
     <?php endif; ?>
     
+    <!-- Statistics Cards -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px;">
         <div style="background: linear-gradient(135deg, rgba(52, 152, 219, 0.2), rgba(41, 128, 185, 0.3)); 
              border-radius: 12px; padding: 20px; border: 1px solid rgba(52, 152, 219, 0.3);">
@@ -406,6 +432,7 @@ require_once $root_dir . '/partials/header.php';
         </div>
     </div>
     
+    <!-- Bookings List Section -->
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
          border-radius: 15px; padding: 25px; margin-bottom: 30px; 
          border: 1px solid rgba(226, 48, 32, 0.3);">
@@ -453,8 +480,12 @@ require_once $root_dir . '/partials/header.php';
                 $minutes_until_show = $booking['minutes_until_show'] ?? 0;
                 $hours_since_booking = $booking['hours_since_booking'] ?? 0;
                 
+                // Check if show has already passed
+                $show_datetime = strtotime($booking['show_date'] . ' ' . $booking['showtime']);
+                $is_show_passed = $show_datetime < time();
+                
                 // Determine status and border color
-                $border_color = '#e74c3c'; // Default red for expired/cancelled
+                $border_color = '#e74c3c';
                 $status_bg = '';
                 $status_color = '';
                 $status_icon = '';
@@ -463,7 +494,14 @@ require_once $root_dir . '/partials/header.php';
                 $show_cancel_button = false;
                 $status_message = '';
                 
-                if ($booking['booking_status'] == 'cancelled') {
+                // For paid bookings that have passed, mark as Completed with green border
+                if ($is_paid && $is_show_passed && $booking['status'] != 'Cancelled') {
+                    $border_color = '#2ecc71';
+                    $status_bg = 'rgba(46, 204, 113, 0.2)';
+                    $status_color = '#2ecc71';
+                    $status_icon = 'fa-check-double';
+                    $status_text = 'Completed';
+                } elseif ($booking['booking_status'] == 'cancelled') {
                     $border_color = '#e74c3c';
                     $status_bg = 'rgba(231, 76, 60, 0.2)';
                     $status_color = '#e74c3c';
@@ -517,7 +555,7 @@ require_once $root_dir . '/partials/header.php';
                 $payment_text = $is_paid ? 'Paid' : 'Not Paid';
                 
                 $time_remaining = '';
-                if (!$is_cancelled && $booking['booking_status'] != 'expired' && $booking['booking_status'] != 'payment_expired') {
+                if (!$is_cancelled && $booking['booking_status'] != 'expired' && $booking['booking_status'] != 'payment_expired' && !$is_show_passed) {
                     if ($hours_until_show > 24) {
                         $days = floor($hours_until_show / 24);
                         $time_remaining = "$days day" . ($days > 1 ? 's' : '') . ' left – available at the cinema';
@@ -561,6 +599,7 @@ require_once $root_dir . '/partials/header.php';
                 <div style="display: flex; gap: 25px; padding: 25px; 
                      <?php echo ($booking['booking_status'] == 'cancelled' || $booking['booking_status'] == 'expired' || $booking['booking_status'] == 'payment_expired') ? 'opacity: 0.8;' : ''; ?>">
                     
+                    <!-- Movie Poster -->
                     <div style="flex-shrink: 0;">
                         <?php if (!empty($booking['poster_url'])): ?>
                         <img src="<?php echo $booking['poster_url']; ?>" 
@@ -574,6 +613,7 @@ require_once $root_dir . '/partials/header.php';
                         <?php endif; ?>
                     </div>
                     
+                    <!-- Booking Details -->
                     <div style="flex: 1;">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
                             <div>
@@ -615,6 +655,7 @@ require_once $root_dir . '/partials/header.php';
                             </div>
                         </div>
                         
+                        <!-- Booking Info Grid -->
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
                             <div>
                                 <div style="color: var(--pale-red); font-size: 0.9rem; margin-bottom: 5px;">Show Date & Time</div>
@@ -632,6 +673,33 @@ require_once $root_dir . '/partials/header.php';
                                 <div style="color: var(--pale-red); font-size: 0.85rem;">
                                     <?php echo $total_seats ?: 0; ?> seat(s)
                                 </div>
+                            </div>
+                            
+                            <!-- VENUE INFORMATION DISPLAY -->
+                            <div>
+                                <div style="color: var(--pale-red); font-size: 0.9rem; margin-bottom: 5px;">
+                                    <i class="fas fa-building"></i> Venue
+                                </div>
+                                <div style="color: white; font-weight: 600; font-size: 1rem;">
+                                    <?php if (!empty($booking['venue_name'])): ?>
+                                        <?php echo htmlspecialchars($booking['venue_name']); ?>
+                                        <?php if (!empty($booking['venue_location'])): ?>
+                                        <span style="color: var(--pale-red); font-size: 0.8rem; display: block;">
+                                            <?php echo htmlspecialchars($booking['venue_location']); ?>
+                                        </span>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span style="color: rgba(255,255,255,0.5);">Not specified</span>
+                                    <?php endif; ?>
+                                </div>
+                                <?php if (!empty($booking['google_maps_link'])): ?>
+                                <div style="margin-top: 5px;">
+                                    <a href="<?php echo htmlspecialchars($booking['google_maps_link']); ?>" target="_blank" 
+                                       style="color: #3498db; font-size: 0.75rem; text-decoration: none;">
+                                        <i class="fas fa-map-marker-alt"></i> View on Map
+                                    </a>
+                                </div>
+                                <?php endif; ?>
                             </div>
                             
                             <div>
@@ -660,6 +728,7 @@ require_once $root_dir . '/partials/header.php';
                         </div>
                         <?php endif; ?>
                         
+                        <!-- Action Buttons -->
                         <div style="display: flex; flex-wrap: wrap; gap: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); align-items: center;">
                             <div style="display: flex; flex-wrap: wrap; gap: 12px; flex: 1;">
                                 <?php if ($payment_time_remaining): ?>
@@ -668,7 +737,7 @@ require_once $root_dir . '/partials/header.php';
                                 </span>
                                 <?php endif; ?>
                                 
-                                <?php if ($time_remaining && $booking['booking_status'] != 'expired' && $booking['booking_status'] != 'payment_expired'): ?>
+                                <?php if ($time_remaining && $booking['booking_status'] != 'expired' && $booking['booking_status'] != 'payment_expired' && !$is_show_passed): ?>
                                 <span style="color: var(--pale-red); font-size: 0.9rem; font-weight: 600; display: inline-flex; align-items: center; gap: 8px;">
                                     <i class="fas fa-hourglass-half"></i> <?php echo $time_remaining; ?>
                                 </span>
@@ -690,11 +759,9 @@ require_once $root_dir . '/partials/header.php';
                                 </a>
                                 <?php endif; ?>
                                 
-                                <?php if ($is_paid && !empty($booking['movie_id']) && $booking['booking_status'] != 'expired'): ?>
+                                <?php if ($is_paid && !empty($booking['movie_id']) && $booking['booking_status'] != 'expired' && !$is_show_passed): ?>
                                 <a href="<?php echo SITE_URL; ?>index.php?page=customer/rebook&booking_id=<?php echo $booking['b_id']; ?>&seat_type=<?php echo $seat_type_for_rebook; ?>" 
-                                   class="btn btn-success" style="padding: 10px 20px; background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%); color: white; box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3); text-decoration: none; display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: 10px; font-weight: 600; transition: all 0.3s ease; cursor: pointer; font-size: 1rem;"
-                                   onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 25px rgba(46, 204, 113, 0.4)';"
-                                   onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(46, 204, 113, 0.3)';">
+                                   class="btn btn-success" style="padding: 10px 20px;">
                                     <i class="fas fa-redo-alt"></i> Rebook
                                 </a>
                                 <?php endif; ?>
@@ -731,6 +798,7 @@ require_once $root_dir . '/partials/header.php';
         <?php endif; ?>
     </div>
     
+    <!-- Help Section (when no bookings) -->
     <?php if (empty($bookings)): ?>
     <div style="background: linear-gradient(135deg, rgba(52, 152, 219, 0.1), rgba(41, 128, 185, 0.2)); 
          border-radius: 15px; padding: 40px; text-align: center; margin-top: 30px;
@@ -877,10 +945,6 @@ require_once $root_dir . '/partials/header.php';
 
 .alert {
     animation: fadeIn 0.5s ease;
-}
-
-.booking-card {
-    animation: slideIn 0.5s ease;
 }
 
 @media (max-width: 992px) {

@@ -23,12 +23,15 @@ $success = '';
 $edit_mode = false;
 $edit_movie = null;
 
-// Create uploads/venue directory if it doesn't exist
+// Create uploads/venue directory if it doesn't exist (for backward compatibility)
 $venue_upload_dir = $root_dir . "/uploads/venue/";
 if (!file_exists($venue_upload_dir)) {
     mkdir($venue_upload_dir, 0777, true);
 }
 
+// ============================================
+// ADD MOVIE
+// ============================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_movie'])) {
     $title = htmlspecialchars(trim($_POST['title']), ENT_QUOTES, 'UTF-8');
     $director = htmlspecialchars(trim($_POST['director'] ?? ''), ENT_QUOTES, 'UTF-8');
@@ -38,54 +41,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_movie'])) {
     $description = trim($_POST['description']);
     $poster_url = htmlspecialchars(trim($_POST['poster_url'] ?? ''), ENT_QUOTES, 'UTF-8');
     $trailer_url = htmlspecialchars(trim($_POST['trailer_url'] ?? ''), ENT_QUOTES, 'UTF-8');
-    $venue_name = htmlspecialchars(trim($_POST['venue_name'] ?? ''), ENT_QUOTES, 'UTF-8');
-    $venue_location = htmlspecialchars(trim($_POST['venue_location'] ?? ''), ENT_QUOTES, 'UTF-8');
-    $google_maps_link = trim($_POST['google_maps_link'] ?? '');
+    $venue_id = !empty($_POST['venue_id']) ? intval($_POST['venue_id']) : null;
     $standard_price = floatval($_POST['standard_price'] ?? 350);
     $premium_price = floatval($_POST['premium_price'] ?? 450);
     $sweet_spot_price = floatval($_POST['sweet_spot_price'] ?? 550);
     
-    // Handle venue photo upload
-    $venue_photo_path = '';
-    if (isset($_FILES['venue_photo']) && $_FILES['venue_photo']['error'] == 0) {
-        $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/webp'];
-        $file_type = $_FILES['venue_photo']['type'];
-        
-        if (!in_array($file_type, $allowed_types)) {
-            $error = "Only JPG, PNG, GIF, and WEBP files are allowed for venue photo.";
-        } elseif ($_FILES['venue_photo']['size'] > 5000000) {
-            $error = "Venue photo file size must be less than 5MB.";
-        } else {
-            $extension = pathinfo($_FILES['venue_photo']['name'], PATHINFO_EXTENSION);
-            $filename = 'venue_' . time() . '_' . rand(1000, 9999) . '.' . $extension;
-            $target_file = $venue_upload_dir . $filename;
-            
-            if (move_uploaded_file($_FILES['venue_photo']['tmp_name'], $target_file)) {
-                $venue_photo_path = 'uploads/venue/' . $filename;
-            } else {
-                $error = "Failed to upload venue photo. Please try again.";
-            }
-        }
-    }
-    
     if (empty($title) || empty($genre) || empty($duration) || empty($rating) || empty($description)) {
         $error = "All required fields must be filled!";
+    } elseif ($venue_id === null || $venue_id <= 0) {
+        $error = "Please select a venue!";
     } else {
-        $stmt = $conn->prepare("INSERT INTO movies (title, director, genre, duration, rating, description, poster_url, trailer_url, venue_name, venue_location, google_maps_link, venue_photo_path, standard_price, premium_price, sweet_spot_price, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("ssssssssssssdddi", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $google_maps_link, $venue_photo_path, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id']);
+        // Verify venue exists
+        $venue_check = $conn->prepare("SELECT id FROM venues WHERE id = ?");
+        $venue_check->bind_param("i", $venue_id);
+        $venue_check->execute();
+        $venue_result = $venue_check->get_result();
         
-        if ($stmt->execute()) {
-            $new_movie_id = $stmt->insert_id;
-            $success = "Movie added successfully! ID: " . $new_movie_id;
-            $_POST = array();
+        if ($venue_result->num_rows === 0) {
+            $error = "Selected venue does not exist!";
         } else {
-            $error = "Failed to add movie: " . $conn->error;
+            $stmt = $conn->prepare("INSERT INTO movies (title, director, genre, duration, rating, description, poster_url, trailer_url, venue_id, standard_price, premium_price, sweet_spot_price, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("sssssssssdddi", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_id, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id']);
+            
+            if ($stmt->execute()) {
+                $new_movie_id = $stmt->insert_id;
+                $success = "Movie added successfully! ID: " . $new_movie_id;
+                $_POST = array();
+            } else {
+                $error = "Failed to add movie: " . $conn->error;
+            }
+            
+            $stmt->close();
         }
-        
-        $stmt->close();
+        $venue_check->close();
     }
 }
 
+// ============================================
+// UPDATE MOVIE
+// ============================================
 elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_movie'])) {
     $id = intval($_POST['id']);
     $title = htmlspecialchars(trim($_POST['title']), ENT_QUOTES, 'UTF-8');
@@ -96,83 +90,44 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_movie'])) 
     $description = trim($_POST['description']);
     $poster_url = htmlspecialchars(trim($_POST['poster_url'] ?? ''), ENT_QUOTES, 'UTF-8');
     $trailer_url = htmlspecialchars(trim($_POST['trailer_url'] ?? ''), ENT_QUOTES, 'UTF-8');
-    $venue_name = htmlspecialchars(trim($_POST['venue_name'] ?? ''), ENT_QUOTES, 'UTF-8');
-    $venue_location = htmlspecialchars(trim($_POST['venue_location'] ?? ''), ENT_QUOTES, 'UTF-8');
-    $google_maps_link = trim($_POST['google_maps_link'] ?? '');
+    $venue_id = !empty($_POST['venue_id']) ? intval($_POST['venue_id']) : null;
     $standard_price = floatval($_POST['standard_price'] ?? 350);
     $premium_price = floatval($_POST['premium_price'] ?? 450);
     $sweet_spot_price = floatval($_POST['sweet_spot_price'] ?? 550);
     
-    // Handle venue photo upload for update
-    $venue_photo_path = '';
-    $has_new_photo = false;
-    
-    if (isset($_FILES['venue_photo']) && $_FILES['venue_photo']['error'] == 0) {
-        $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/webp'];
-        $file_type = $_FILES['venue_photo']['type'];
+    if (empty($title) || empty($genre) || empty($duration) || empty($rating) || empty($description)) {
+        $error = "All required fields must be filled!";
+    } elseif ($venue_id === null || $venue_id <= 0) {
+        $error = "Please select a venue!";
+    } else {
+        // Verify venue exists
+        $venue_check = $conn->prepare("SELECT id FROM venues WHERE id = ?");
+        $venue_check->bind_param("i", $venue_id);
+        $venue_check->execute();
+        $venue_result = $venue_check->get_result();
         
-        if (!in_array($file_type, $allowed_types)) {
-            $error = "Only JPG, PNG, GIF, and WEBP files are allowed for venue photo.";
-        } elseif ($_FILES['venue_photo']['size'] > 5000000) {
-            $error = "Venue photo file size must be less than 5MB.";
+        if ($venue_result->num_rows === 0) {
+            $error = "Selected venue does not exist!";
         } else {
-            $extension = pathinfo($_FILES['venue_photo']['name'], PATHINFO_EXTENSION);
-            $filename = 'venue_' . time() . '_' . rand(1000, 9999) . '.' . $extension;
-            $target_file = $venue_upload_dir . $filename;
+            $stmt = $conn->prepare("UPDATE movies SET title = ?, director = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, venue_id = ?, standard_price = ?, premium_price = ?, sweet_spot_price = ?, updated_by = ? WHERE id = ?");
+            $stmt->bind_param("sssssssssdddii", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_id, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id'], $id);
             
-            if (move_uploaded_file($_FILES['venue_photo']['tmp_name'], $target_file)) {
-                $venue_photo_path = 'uploads/venue/' . $filename;
-                $has_new_photo = true;
+            if ($stmt->execute()) {
+                $success = "Movie updated successfully!";
             } else {
-                $error = "Failed to upload venue photo. Please try again.";
+                $error = "Failed to update movie: " . $stmt->error;
             }
+            $stmt->close();
         }
-    }
-    
-    if (empty($error)) {
-        if ($has_new_photo) {
-            // Delete old venue photo if exists
-            $old_photo_stmt = $conn->prepare("SELECT venue_photo_path FROM movies WHERE id = ?");
-            $old_photo_stmt->bind_param("i", $id);
-            $old_photo_stmt->execute();
-            $old_photo_result = $old_photo_stmt->get_result();
-            $old_photo_data = $old_photo_result->fetch_assoc();
-            $old_photo_stmt->close();
-            
-            if ($old_photo_data && !empty($old_photo_data['venue_photo_path']) && file_exists($root_dir . '/' . $old_photo_data['venue_photo_path'])) {
-                unlink($root_dir . '/' . $old_photo_data['venue_photo_path']);
-            }
-            
-            $stmt = $conn->prepare("UPDATE movies SET title = ?, director = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, venue_name = ?, venue_location = ?, google_maps_link = ?, venue_photo_path = ?, standard_price = ?, premium_price = ?, sweet_spot_price = ?, updated_by = ? WHERE id = ?");
-            $stmt->bind_param("ssssssssssssdddii", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $google_maps_link, $venue_photo_path, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id'], $id);
-        } else {
-            $stmt = $conn->prepare("UPDATE movies SET title = ?, director = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, venue_name = ?, venue_location = ?, google_maps_link = ?, standard_price = ?, premium_price = ?, sweet_spot_price = ?, updated_by = ? WHERE id = ?");
-            $stmt->bind_param("sssssssssssdddii", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_name, $venue_location, $google_maps_link, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id'], $id);
-        }
-        
-        if ($stmt->execute()) {
-            $success = "Movie updated successfully!";
-        } else {
-            $error = "Failed to update movie: " . $stmt->error;
-        }
-        $stmt->close();
+        $venue_check->close();
     }
 }
 
+// ============================================
+// DELETE MOVIE
+// ============================================
 elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $id = intval($_GET['delete']);
-    
-    // Get venue photo path to delete the file
-    $photo_stmt = $conn->prepare("SELECT venue_photo_path FROM movies WHERE id = ?");
-    $photo_stmt->bind_param("i", $id);
-    $photo_stmt->execute();
-    $photo_result = $photo_stmt->get_result();
-    $photo_data = $photo_result->fetch_assoc();
-    $photo_stmt->close();
-    
-    if ($photo_data && !empty($photo_data['venue_photo_path']) && file_exists($root_dir . '/' . $photo_data['venue_photo_path'])) {
-        unlink($root_dir . '/' . $photo_data['venue_photo_path']);
-    }
     
     $stmt = $conn->prepare("UPDATE movies SET is_active = 0 WHERE id = ?");
     $stmt->bind_param("i", $id);
@@ -185,11 +140,19 @@ elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $stmt->close();
 }
 
+// ============================================
+// FETCH ALL MOVIES with Venue Information
+// ============================================
 $movies_result = $conn->query("
     SELECT m.*, 
+           v.venue_name, 
+           v.venue_location, 
+           v.google_maps_link,
+           v.venue_photo_path,
            a.u_name as added_by_name,
            u.u_name as updated_by_name
     FROM movies m
+    LEFT JOIN venues v ON m.venue_id = v.id
     LEFT JOIN users a ON m.added_by = a.u_id
     LEFT JOIN users u ON m.updated_by = u.u_id
     WHERE m.is_active = 1 
@@ -203,13 +166,32 @@ if ($movies_result) {
     }
 }
 
+// ============================================
+// FETCH ALL VENUES for Dropdown
+// ============================================
+$venues_result = $conn->query("SELECT id, venue_name, venue_location FROM venues ORDER BY venue_name");
+$venues = [];
+if ($venues_result) {
+    while ($row = $venues_result->fetch_assoc()) {
+        $venues[] = $row;
+    }
+}
+
+// ============================================
+// GET EDIT MOVIE DATA
+// ============================================
 if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
     $edit_id = intval($_GET['edit']);
     $stmt = $conn->prepare("
         SELECT m.*, 
+               v.venue_name, 
+               v.venue_location, 
+               v.google_maps_link,
+               v.venue_photo_path,
                a.u_name as added_by_name,
                u.u_name as updated_by_name
         FROM movies m
+        LEFT JOIN venues v ON m.venue_id = v.id
         LEFT JOIN users a ON m.added_by = a.u_id
         LEFT JOIN users u ON m.updated_by = u.u_id
         WHERE m.id = ? AND m.is_active = 1
@@ -248,6 +230,7 @@ $conn->close();
         </div>
     <?php endif; ?>
 
+    <!-- Add/Edit Movie Form -->
     <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(52, 152, 219, 0.2);">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
             <i class="<?php echo $edit_mode ? 'fas fa-edit' : 'fas fa-plus-circle'; ?>"></i>
@@ -261,11 +244,12 @@ $conn->close();
         </div>
         <?php endif; ?>
         
-        <form method="POST" action="" id="movieForm" enctype="multipart/form-data">
+        <form method="POST" action="" id="movieForm">
             <?php if ($edit_mode): ?>
             <input type="hidden" name="id" value="<?php echo $edit_movie['id']; ?>">
             <?php endif; ?>
             
+            <!-- Basic Movie Information -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; margin-bottom: 30px;">
                 <div>
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
@@ -313,7 +297,7 @@ $conn->close();
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-star"></i> Rating *
                     </label>
-                    <select id="rating" name="rating" required style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem; cursor: pointer; appearance: none; background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" fill=\"white\" viewBox=\"0 0 20 20\"><path d=\"M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z\"/></svg>'); background-repeat: no-repeat; background-position: right 16px center; background-size: 16px;">
+                    <select id="rating" name="rating" required style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem; cursor: pointer; appearance: none;">
                         <option value="" style="background: #2c3e50; color: white;">Select Rating</option>
                         <option value="G" style="background: #2c3e50; color: white;" <?php echo ($edit_mode && $edit_movie['rating'] == 'G') || (isset($_POST['rating']) && $_POST['rating'] == 'G') ? 'selected' : ''; ?>>G - General Audiences</option>
                         <option value="PG" style="background: #2c3e50; color: white;" <?php echo ($edit_mode && $edit_movie['rating'] == 'PG') || (isset($_POST['rating']) && $_POST['rating'] == 'PG') ? 'selected' : ''; ?>>PG - Parental Guidance</option>
@@ -336,11 +320,9 @@ $conn->close();
                         echo htmlspecialchars($_POST['description'], ENT_QUOTES, 'UTF-8');
                     }
                 ?></textarea>
-                <div style="color: rgba(255,255,255,0.6); font-size: 0.85rem; margin-top: 5px;">
-                    <i class="fas fa-info-circle"></i> You can use quotation marks (" ") and other special characters
-                </div>
             </div>
 
+            <!-- Images and Trailers -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; margin-bottom: 30px;">
                 <div>
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
@@ -363,87 +345,81 @@ $conn->close();
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; margin-bottom: 30px;">
-                <div>
-                    <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
-                        <i class="fas fa-building"></i> Venue Name
-                    </label>
-                    <input type="text" id="venue_name" name="venue_name" 
-                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['venue_name'] ?? '', ENT_QUOTES, 'UTF-8') : (isset($_POST['venue_name']) ? htmlspecialchars($_POST['venue_name'], ENT_QUOTES, 'UTF-8') : ''); ?>"
-                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           placeholder="e.g., SM Cinema, Ayala Malls Cinemas">
-                </div>
+            <!-- VENUE INFORMATION SECTION - NOW USING DROPDOWN -->
+            <div style="background: rgba(52, 152, 219, 0.1); border-radius: 15px; padding: 25px; margin-bottom: 30px; border: 1px solid rgba(52, 152, 219, 0.3);">
+                <h3 style="color: white; font-size: 1.4rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-map-marker-alt" style="color: #e74c3c;"></i> Venue Information
+                </h3>
                 
-                <div>
+                <div style="margin-bottom: 20px;">
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
-                        <i class="fas fa-map-marker-alt"></i> Venue Location
+                        <i class="fas fa-building"></i> Select Venue *
                     </label>
-                    <input type="text" id="venue_location" name="venue_location" 
-                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['venue_location'] ?? '', ENT_QUOTES, 'UTF-8') : (isset($_POST['venue_location']) ? htmlspecialchars($_POST['venue_location'], ENT_QUOTES, 'UTF-8') : ''); ?>"
-                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           placeholder="e.g., SM City Cebu, North Wing, 3rd Floor">
-                </div>
-            </div>
-
-            <div style="margin-bottom: 30px;">
-                <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
-                    <i class="fas fa-map"></i> Google Maps Link
-                </label>
-                <input type="text" id="google_maps_link" name="google_maps_link" 
-                       value="<?php echo $edit_mode ? ($edit_movie['google_maps_link'] ?? '') : (isset($_POST['google_maps_link']) ? $_POST['google_maps_link'] : ''); ?>"
-                       style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                       placeholder="https://www.google.com/maps/@10.2701001,123.7749591,3a,75y...">
-                <div style="margin-top: 8px; font-size: 0.85rem; color: rgba(255,255,255,0.6);">
-                    <i class="fas fa-info-circle"></i> 
-                    Paste the full Google Maps link here
-                </div>
-            </div>
-
-            <!-- NEW: Venue Photo Upload Section -->
-            <div style="margin-bottom: 30px;">
-                <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
-                    <i class="fas fa-camera"></i> Venue Photo
-                </label>
-                <?php if ($edit_mode && !empty($edit_movie['venue_photo_path'])): ?>
-                <div style="margin-bottom: 15px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 10px;">
-                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                        <img src="<?php echo SITE_URL . $edit_movie['venue_photo_path']; ?>" 
-                             alt="Current Venue Photo"
-                             style="max-width: 200px; max-height: 150px; border-radius: 8px; border: 2px solid rgba(52,152,219,0.3);">
-                        <div>
-                            <p style="color: rgba(255,255,255,0.8); margin-bottom: 5px;">
-                                <i class="fas fa-image"></i> Current venue photo
-                            </p>
-                            <p style="color: rgba(255,255,255,0.6); font-size: 0.85rem;">
-                                Upload a new photo to replace it
-                            </p>
+                    
+                    <?php if (empty($venues)): ?>
+                        <div style="background: rgba(241, 196, 15, 0.2); color: #f39c12; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                            <i class="fas fa-exclamation-triangle"></i> 
+                            No venues available. Please <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" style="color: #f39c12; text-decoration: underline;">add a venue first</a> before adding movies.
                         </div>
+                    <?php else: ?>
+                        <select id="venue_id" name="venue_id" required style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem; cursor: pointer;">
+                            <option value="" style="background: #2c3e50; color: white;">-- Select Venue --</option>
+                            <?php foreach ($venues as $venue): ?>
+                            <option value="<?php echo $venue['id']; ?>" 
+                                <?php 
+                                    if ($edit_mode && $edit_movie['venue_id'] == $venue['id']) echo 'selected';
+                                    if (isset($_POST['venue_id']) && $_POST['venue_id'] == $venue['id']) echo 'selected';
+                                ?>
+                                style="background: #2c3e50; color: white;">
+                                <?php echo htmlspecialchars($venue['venue_name']); ?> 
+                                (<?php echo htmlspecialchars($venue['venue_location']); ?>)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                    <?php endif; ?>
+                    
+                    <div style="margin-top: 10px;">
+                        <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" target="_blank" 
+                           style="color: #3498db; text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 5px;">
+                            <i class="fas fa-plus-circle"></i> + Add New Venue
+                        </a>
+                        <span style="color: rgba(255, 255, 255, 0.4); margin: 0 10px;">|</span>
+                        <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" target="_blank" 
+                           style="color: #2ecc71; text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 5px;">
+                            <i class="fas fa-edit"></i> Manage Venues
+                        </a>
                     </div>
                 </div>
-                <?php endif; ?>
                 
-                <div style="border: 2px dashed rgba(52,152,219,0.3); border-radius: 10px; padding: 25px; text-align: center; background: rgba(255, 255, 255, 0.02);">
-                    <i class="fas fa-cloud-upload-alt" style="font-size: 2.5rem; color: var(--pale-red); margin-bottom: 10px;"></i>
-                    <p style="color: white; margin-bottom: 10px;">Upload venue photo (optional)</p>
-                    <p style="color: rgba(255,255,255,0.6); font-size: 0.85rem; margin-bottom: 15px;">JPG, PNG, GIF, WEBP (Max 5MB)</p>
-                    <input type="file" name="venue_photo" accept="image/*" style="display: none;" id="venuePhotoInput">
-                    <button type="button" onclick="document.getElementById('venuePhotoInput').click()" class="btn btn-secondary" style="padding: 10px 20px;">
-                        <i class="fas fa-folder-open"></i> Choose Photo
-                    </button>
-                    <div id="venuePhotoName" style="margin-top: 10px; color: #2ecc71; font-size: 0.9rem;"></div>
+                <!-- Display selected venue details if editing -->
+                <?php if ($edit_mode && !empty($edit_movie['venue_name'])): ?>
+                <div style="background: rgba(0,0,0,0.2); border-radius: 10px; padding: 15px; margin-top: 15px;">
+                    <div style="color: var(--pale-red); font-size: 0.85rem; margin-bottom: 8px;">
+                        <i class="fas fa-info-circle"></i> Current Venue Details:
+                    </div>
+                    <div style="color: white; font-size: 0.95rem;">
+                        <strong><?php echo htmlspecialchars($edit_movie['venue_name']); ?></strong><br>
+                        <?php echo htmlspecialchars($edit_movie['venue_location']); ?>
+                    </div>
+                    <?php if (!empty($edit_movie['google_maps_link'])): ?>
+                    <div style="margin-top: 8px;">
+                        <a href="<?php echo htmlspecialchars($edit_movie['google_maps_link']); ?>" target="_blank" 
+                           style="color: #3498db; font-size: 0.85rem; text-decoration: none;">
+                            <i class="fas fa-map-marked-alt"></i> View on Google Maps
+                        </a>
+                    </div>
+                    <?php endif; ?>
                 </div>
-                <div style="margin-top: 8px; font-size: 0.85rem; color: rgba(255,255,255,0.5);">
-                    <i class="fas fa-info-circle"></i> 
-                    This photo will be displayed to customers on the venue page
-                </div>
+                <?php endif; ?>
             </div>
 
+            <!-- Seat Pricing Section (Unchanged) -->
             <div style="margin-bottom: 30px;">
-                <h3 style="color: white; font-size: 1.3rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
+                <h3 style="color: white; font-size: 1.4rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
                     <i class="fas fa-tags"></i> Seat Pricing
                 </h3>
                 <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 20px; font-size: 0.95rem;">
-                    Set custom prices for each seat type. Leave default values if no changes needed.
+                    Set custom prices for each seat type. These prices will be used when creating schedules for this movie.
                 </p>
                 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 25px;">
@@ -455,7 +431,6 @@ $conn->close();
                                value="<?php echo $edit_mode ? ($edit_movie['standard_price'] ?? 350) : (isset($_POST['standard_price']) ? $_POST['standard_price'] : 350); ?>"
                                style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid #3498db; border-radius: 10px; color: white; font-size: 1rem;"
                                placeholder="350.00">
-                        <div style="color: #3498db; font-size: 0.85rem; margin-top: 5px;">Default: ₱350.00</div>
                     </div>
                     
                     <div>
@@ -466,7 +441,6 @@ $conn->close();
                                value="<?php echo $edit_mode ? ($edit_movie['premium_price'] ?? 450) : (isset($_POST['premium_price']) ? $_POST['premium_price'] : 450); ?>"
                                style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid #2ecc71; border-radius: 10px; color: white; font-size: 1rem;"
                                placeholder="450.00">
-                        <div style="color: #2ecc71; font-size: 0.85rem; margin-top: 5px;">Default: ₱450.00</div>
                     </div>
                     
                     <div>
@@ -477,7 +451,6 @@ $conn->close();
                                value="<?php echo $edit_mode ? ($edit_movie['sweet_spot_price'] ?? 550) : (isset($_POST['sweet_spot_price']) ? $_POST['sweet_spot_price'] : 550); ?>"
                                style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid #e74c3c; border-radius: 10px; color: white; font-size: 1rem;"
                                placeholder="550.00">
-                        <div style="color: #e74c3c; font-size: 0.85rem; margin-top: 5px;">Default: ₱550.00</div>
                     </div>
                 </div>
             </div>
@@ -499,6 +472,7 @@ $conn->close();
         </form>
     </div>
 
+    <!-- Movies List Table (Updated to show venue from joined table) -->
     <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; border: 1px solid rgba(52, 152, 219, 0.2);">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
             <i class="fas fa-film"></i> All Movies (<?php echo $movie_count; ?>)
@@ -511,20 +485,18 @@ $conn->close();
         </div>
         <?php else: ?>
         <div style="overflow-x: auto; border-radius: 10px; border: 1px solid rgba(52, 152, 219, 0.2);">
-            <table style="width: 100%; border-collapse: collapse; min-width: 1500px;">
+            <table style="width: 100%; border-collapse: collapse; min-width: 1200px;">
                 <thead>
-                    <tr>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">ID</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Poster</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Movie Details</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Director</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Seat Prices</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Venue</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Venue Photo</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Google Maps</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Trailer</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Admin Info</th>
-                        <th style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Actions</th>
+                    <tr style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);">
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">ID</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Poster</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Movie Details</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Director</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Seat Prices</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Venue</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Trailer</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Admin Info</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -535,8 +507,7 @@ $conn->close();
                             <?php if (!empty($movie['poster_url'])): ?>
                             <img src="<?php echo $movie['poster_url']; ?>" 
                                  alt="<?php echo htmlspecialchars($movie['title'], ENT_QUOTES, 'UTF-8'); ?>"
-                                 style="width: 70px; height: 100px; object-fit: cover; border-radius: 8px; border: 2px solid rgba(52, 152, 219, 0.3);"
-                                 onerror="this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 70 100\"><rect width=\"70\" height=\"100\" fill=\"%232c3e50\"/></svg>'">
+                                 style="width: 70px; height: 100px; object-fit: cover; border-radius: 8px; border: 2px solid rgba(52, 152, 219, 0.3);">
                             <?php else: ?>
                             <div style="width: 70px; height: 100px; background: rgba(52, 152, 219, 0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 2px solid rgba(52, 152, 219, 0.2);">
                                 <i class="fas fa-film" style="color: rgba(52, 152, 219, 0.5); font-size: 1.8rem;"></i>
@@ -582,39 +553,15 @@ $conn->close();
                             </div>
                         </td>
                         <td style="padding: 16px;">
-                            <?php if (!empty($movie['venue_name']) || !empty($movie['venue_location'])): ?>
-                                <div style="color: white; font-weight: 600; margin-bottom: 5px;">
-                                    <?php echo htmlspecialchars($movie['venue_name'] ?? 'N/A', ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if (!empty($movie['venue_name'])): ?>
+                                <div style="color: #2ecc71; font-weight: 600; margin-bottom: 5px;">
+                                    <i class="fas fa-building"></i> <?php echo htmlspecialchars($movie['venue_name'], ENT_QUOTES, 'UTF-8'); ?>
                                 </div>
                                 <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.85rem;">
                                     <?php echo htmlspecialchars($movie['venue_location'] ?? '', ENT_QUOTES, 'UTF-8'); ?>
                                 </div>
                             <?php else: ?>
-                                <span style="color: rgba(255, 255, 255, 0.5);">Not specified</span>
-                            <?php endif; ?>
-                        </td>
-                        <td style="padding: 16px;">
-                            <?php if (!empty($movie['venue_photo_path'])): ?>
-                            <img src="<?php echo SITE_URL . $movie['venue_photo_path']; ?>" 
-                                 alt="Venue Photo"
-                                 style="width: 70px; height: 70px; object-fit: cover; border-radius: 8px; border: 2px solid rgba(52,152,219,0.3);"
-                                 onerror="this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 70 70\"><rect width=\"70\" height=\"70\" fill=\"%232c3e50\"/></svg>'">
-                            <?php else: ?>
-                            <div style="width: 70px; height: 70px; background: rgba(52,152,219,0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 2px solid rgba(52,152,219,0.2);">
-                                <i class="fas fa-camera" style="color: rgba(52,152,219,0.5); font-size: 1.5rem;"></i>
-                            </div>
-                            <?php endif; ?>
-                        </td>
-                        <td style="padding: 16px;">
-                            <?php if (!empty($movie['google_maps_link'])): ?>
-                            <a href="<?php echo htmlspecialchars($movie['google_maps_link'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" 
-                               style="color: #3498db; text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(52, 152, 219, 0.1); border-radius: 6px; border: 1px solid rgba(52, 152, 219, 0.3);">
-                                <i class="fas fa-map-marker-alt"></i> View Map
-                            </a>
-                            <?php else: ?>
-                            <span style="color: rgba(255, 255, 255, 0.5); font-size: 0.9rem;">
-                                <i class="fas fa-times-circle"></i> No Map
-                            </span>
+                                <span style="color: rgba(255, 255, 255, 0.5);">No venue assigned</span>
                             <?php endif; ?>
                         </td>
                         <td style="padding: 16px;">
@@ -706,27 +653,23 @@ $conn->close();
 </style>
 
 <script>
-// Handle venue photo file selection display
-document.getElementById('venuePhotoInput')?.addEventListener('change', function(e) {
-    const fileName = e.target.files[0]?.name;
-    const fileNameDiv = document.getElementById('venuePhotoName');
-    if (fileName) {
-        fileNameDiv.innerHTML = '<i class="fas fa-check-circle"></i> Selected: ' + fileName;
-    } else {
-        fileNameDiv.innerHTML = '';
-    }
-});
-
 document.getElementById('movieForm')?.addEventListener('submit', function(e) {
     const title = document.getElementById('title').value.trim();
     const genre = document.getElementById('genre').value.trim();
     const duration = document.getElementById('duration').value.trim();
     const rating = document.getElementById('rating').value;
     const description = document.getElementById('description').value.trim();
+    const venueId = document.getElementById('venue_id')?.value;
     
     if (!title || !genre || !duration || !rating || !description) {
         e.preventDefault();
         alert('Please fill in all required fields!');
+        return false;
+    }
+    
+    if (!venueId || venueId === '') {
+        e.preventDefault();
+        alert('Please select a venue!');
         return false;
     }
     

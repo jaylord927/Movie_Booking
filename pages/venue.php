@@ -9,15 +9,14 @@ $conn = get_db_connection();
 // Get search term
 $search = isset($_GET['search']) ? sanitize_input($_GET['search']) : '';
 
-// Get all unique venues from movies table with their details
-$venue_query = "SELECT DISTINCT venue_name, venue_location, google_maps_link, venue_photo_path 
-                FROM movies 
-                WHERE is_active = 1 
-                AND venue_name IS NOT NULL 
-                AND venue_name != ''";
+// ============================================
+// UPDATED QUERY: Get all venues from venues table
+// ============================================
+$venue_query = "SELECT * FROM venues";
 
 if (!empty($search)) {
-    $venue_query .= " AND venue_name LIKE '%$search%'";
+    $search_escaped = $conn->real_escape_string($search);
+    $venue_query .= " WHERE venue_name LIKE '%$search_escaped%' OR venue_location LIKE '%$search_escaped%'";
 }
 
 $venue_query .= " ORDER BY venue_name";
@@ -26,6 +25,15 @@ $venues_result = $conn->query($venue_query);
 $venues = [];
 if ($venues_result) {
     while ($row = $venues_result->fetch_assoc()) {
+        // Get movie count for this venue
+        $movie_count_stmt = $conn->prepare("SELECT COUNT(*) as count FROM movies WHERE venue_id = ? AND is_active = 1");
+        $movie_count_stmt->bind_param("i", $row['id']);
+        $movie_count_stmt->execute();
+        $movie_count_result = $movie_count_stmt->get_result();
+        $movie_count = $movie_count_result->fetch_assoc()['count'];
+        $movie_count_stmt->close();
+        
+        $row['movie_count'] = $movie_count;
         $venues[] = $row;
     }
 }
@@ -66,6 +74,15 @@ $conn->close();
                 <?php endif; ?>
             </div>
         </form>
+        
+        <!-- Results count -->
+        <?php if ($search && !empty($venues)): ?>
+        <div style="margin-top: 15px; text-align: center;">
+            <p style="color: var(--pale-red); font-size: 0.9rem;">
+                Found <strong style="color: white;"><?php echo count($venues); ?></strong> venue(s) matching "<strong><?php echo htmlspecialchars($search); ?></strong>"
+            </p>
+        </div>
+        <?php endif; ?>
     </div>
 
     <?php if (empty($venues)): ?>
@@ -123,7 +140,18 @@ $conn->close();
                         <div style="width: 50px; height: 50px; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                             <i class="fas fa-building" style="color: white; font-size: 1.5rem;"></i>
                         </div>
-                        <h2 style="color: white; font-size: 1.5rem; font-weight: 700; flex: 1;"><?php echo htmlspecialchars($venue['venue_name']); ?></h2>
+                        <div style="flex: 1;">
+                            <h2 style="color: white; font-size: 1.5rem; font-weight: 700;"><?php echo htmlspecialchars($venue['venue_name']); ?></h2>
+                            <?php if ($venue['movie_count'] > 0): ?>
+                            <span style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; padding: 3px 10px; border-radius: 15px; font-size: 0.7rem; font-weight: 600;">
+                                <i class="fas fa-film"></i> <?php echo $venue['movie_count']; ?> movie<?php echo $venue['movie_count'] != 1 ? 's' : ''; ?> showing
+                            </span>
+                            <?php else: ?>
+                            <span style="background: rgba(149, 165, 166, 0.2); color: #95a5a6; padding: 3px 10px; border-radius: 15px; font-size: 0.7rem; font-weight: 600;">
+                                <i class="fas fa-clock"></i> No movies currently
+                            </span>
+                            <?php endif; ?>
+                        </div>
                     </div>
                     
                     <?php if (!empty($venue['venue_location']) && !$is_same_location): ?>
@@ -147,7 +175,7 @@ $conn->close();
                 
                 <!-- Two Column Layout: Venue Photo + Map -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 0 25px 20px 25px; flex: 1;">
-                    <!-- Venue Photo Column - MODIFIED with click-to-expand -->
+                    <!-- Venue Photo Column -->
                     <div style="display: flex; flex-direction: column;">
                         <?php if (!empty($venue['venue_photo_path']) && file_exists($root_dir . '/' . $venue['venue_photo_path'])): ?>
                         <div style="background: rgba(0,0,0,0.3); border-radius: 12px; padding: 15px; height: 100%; display: flex; flex-direction: column;">
@@ -217,8 +245,23 @@ $conn->close();
                            onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 5px 15px rgba(226,48,32,0.4)';"
                            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">
                             <i class="fas fa-film"></i> View All Movies
+                            <?php if ($venue['movie_count'] > 0): ?>
+                            <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 20px; font-size: 0.7rem;">
+                                <?php echo $venue['movie_count']; ?>
+                            </span>
+                            <?php endif; ?>
                         </a>
                     </div>
+                    
+                    <!-- Quick Directions Button (if map available) -->
+                    <?php if ($has_valid_map && !empty($venue['google_maps_link'])): ?>
+                    <div style="margin-top: 10px; text-align: center;">
+                        <a href="<?php echo htmlspecialchars($venue['google_maps_link']); ?>" target="_blank" 
+                           style="color: var(--pale-red); font-size: 0.75rem; text-decoration: none; display: inline-flex; align-items: center; gap: 5px;">
+                            <i class="fas fa-directions"></i> Get Directions
+                        </a>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
             <?php endforeach; ?>
@@ -348,10 +391,6 @@ iframe {
 @media (max-width: 576px) {
     .venue-card > div:nth-child(2) {
         grid-template-columns: 1fr;
-    }
-    
-    .search-container {
-        flex-direction: column;
     }
 }
 

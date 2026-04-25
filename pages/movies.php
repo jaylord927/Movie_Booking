@@ -9,8 +9,21 @@ $conn = get_db_connection();
 // Get filter from URL
 $filter = isset($_GET['filter']) ? $_GET['filter'] : 'all';
 
-// Fetch all active movies
-$movies_result = $conn->query("SELECT m.* FROM movies m WHERE m.is_active = 1 ORDER BY m.created_at DESC");
+// ============================================
+// UPDATED QUERY: Fetch all active movies with venue information
+// ============================================
+$movies_result = $conn->query("
+    SELECT m.*, 
+           v.id as venue_id,
+           v.venue_name, 
+           v.venue_location, 
+           v.google_maps_link,
+           v.venue_photo_path
+    FROM movies m
+    LEFT JOIN venues v ON m.venue_id = v.id
+    WHERE m.is_active = 1 
+    ORDER BY m.created_at DESC
+");
 $all_movies = [];
 if ($movies_result) {
     while ($row = $movies_result->fetch_assoc()) {
@@ -51,11 +64,10 @@ if ($filter === 'now-showing') {
     $display_message = "Browse our complete collection of movies";
 }
 
-// Get all unique genres from displayed movies - FIXED to handle special characters properly
+// Get all unique genres from displayed movies
 $allGenres = [];
 foreach ($movies as $movie) {
     if ($movie['genre']) {
-        // Split by comma and trim each genre
         $genres = array_map('trim', explode(',', $movie['genre']));
         foreach ($genres as $genre) {
             $genre = trim($genre);
@@ -67,12 +79,12 @@ foreach ($movies as $movie) {
 }
 sort($allGenres);
 
-// Get filter parameters - FIXED to properly decode URL parameters
+// Get filter parameters
 $searchTerm = isset($_GET['search']) ? sanitize_input($_GET['search']) : '';
 $selectedGenreRaw = isset($_GET['genre']) ? $_GET['genre'] : '';
 $selectedRating = isset($_GET['rating']) ? sanitize_input($_GET['rating']) : '';
 
-// FIXED: Properly decode the genre parameter (handles %2F for slashes, %20 for spaces, etc.)
+// Properly decode the genre parameter
 $selectedGenre = urldecode($selectedGenreRaw);
 
 // Filter movies
@@ -85,15 +97,12 @@ if (!empty($searchTerm)) {
     });
 }
 
-// FIXED: Genre filtering - properly handle exact matches including special characters
 if (!empty($selectedGenre) && $selectedGenre !== 'all') {
     $filteredMovies = array_filter($filteredMovies, function($movie) use ($selectedGenre) {
         if (empty($movie['genre'])) return false;
         
-        // Split genres by comma and trim each one
         $movieGenres = array_map('trim', explode(',', $movie['genre']));
         
-        // Check if the selected genre matches any of the movie's genres (exact match, case-insensitive)
         foreach ($movieGenres as $genre) {
             if (strcasecmp(trim($genre), $selectedGenre) === 0) {
                 return true;
@@ -156,6 +165,7 @@ $conn->close();
         </a>
     </div>
 
+    <!-- Search and Filter Bar -->
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 15px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(226, 48, 32, 0.2);">
         <div style="margin-bottom: 25px;">
             <form method="GET" action="">
@@ -175,11 +185,9 @@ $conn->close();
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
             <div>
                 <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;"><i class="fas fa-film"></i> Filter by Genre</label>
-                <!-- FIXED: Properly encode genre values when building the URL -->
                 <select id="genreSelect" style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.15); border: 2px solid rgba(226, 48, 32, 0.4); border-radius: 10px; color: white; font-size: 1rem; font-weight: 500; cursor: pointer; transition: all 0.3s ease; appearance: none; background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" fill=\"white\" viewBox=\"0 0 20 20\"><path d=\"M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z\"/></svg>'); background-repeat: no-repeat; background-position: right 16px center; background-size: 16px;">
                     <option value="all" style="background: var(--bg-card); color: white;" <?php echo !$selectedGenre ? 'selected' : ''; ?>>All Genres</option>
                     <?php foreach ($allGenres as $genre): ?>
-                    <!-- FIXED: Use raw genre value without double encoding -->
                     <option value="<?php echo htmlspecialchars($genre); ?>" style="background: var(--bg-card); color: white;" <?php echo $selectedGenre === $genre ? 'selected' : ''; ?>>
                         <?php echo htmlspecialchars($genre); ?>
                     </option>
@@ -256,6 +264,7 @@ $conn->close();
                     </div>
                 <?php endif; ?>
                 
+                <!-- Badges -->
                 <div style="position: absolute; top: 15px; right: 15px; display: flex; flex-direction: column; gap: 8px;">
                     <span style="background: var(--primary-red); color: white; font-weight: 700; font-size: 0.8rem; padding: 6px 12px; border-radius: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); text-align: center; min-width: 40px;"><?php echo $movie['rating'] ?: 'PG'; ?></span>
                     <?php if ($movie['genre']): ?>
@@ -271,17 +280,27 @@ $conn->close();
                 <div style="padding: 25px; flex: 1; display: flex; flex-direction: column;">
                     <h3 style="color: white; font-size: 1.3rem; font-weight: 800; margin-bottom: 10px; line-height: 1.4;"><?php echo htmlspecialchars($movie['title']); ?></h3>
                     
-                    <!-- Venue Information -->
-                    <?php if (!empty($movie['venue_name']) || !empty($movie['venue_location'])): ?>
-                    <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid var(--primary-red);">
-                        <?php if (!empty($movie['venue_name'])): ?>
-                        <div style="display: flex; align-items: center; gap: 8px; color: white; font-weight: 600; font-size: 0.9rem; margin-bottom: 5px;">
-                            <i class="fas fa-building" style="color: var(--primary-red);"></i> <?php echo htmlspecialchars($movie['venue_name']); ?>
+                    <!-- ============================================
+                         VENUE INFORMATION DISPLAY (UPDATED)
+                         Now shows venue name from venues table
+                    ============================================= -->
+                    <?php if (!empty($movie['venue_name'])): ?>
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid var(--primary-red);">
+                        <div style="display: flex; align-items: center; gap: 8px; color: var(--light-red); font-size: 0.85rem; margin-bottom: 3px;">
+                            <i class="fas fa-building"></i> <strong><?php echo htmlspecialchars($movie['venue_name']); ?></strong>
+                        </div>
+                        <?php if (!empty($movie['venue_location'])): ?>
+                        <div style="display: flex; align-items: center; gap: 5px; color: var(--pale-red); font-size: 0.75rem;">
+                            <i class="fas fa-map-pin"></i> <?php echo htmlspecialchars(substr($movie['venue_location'], 0, 50)); ?>
+                            <?php if (strlen($movie['venue_location']) > 50): ?>...<?php endif; ?>
                         </div>
                         <?php endif; ?>
-                        <?php if (!empty($movie['venue_location'])): ?>
-                        <div style="display: flex; align-items: center; gap: 8px; color: var(--pale-red); font-size: 0.85rem;">
-                            <i class="fas fa-map-marker-alt" style="color: var(--primary-red);"></i> <?php echo htmlspecialchars($movie['venue_location']); ?>
+                        <?php if (!empty($movie['google_maps_link'])): ?>
+                        <div style="margin-top: 5px;">
+                            <a href="<?php echo htmlspecialchars($movie['google_maps_link']); ?>" target="_blank" 
+                               style="color: #3498db; font-size: 0.7rem; text-decoration: none;">
+                                <i class="fas fa-map-marked-alt"></i> View on Map
+                            </a>
                         </div>
                         <?php endif; ?>
                     </div>
@@ -495,14 +514,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const ratingSelect = document.getElementById('ratingSelect');
     const filter = '<?php echo $filter; ?>';
     
-    // FIXED: Properly handle genre selection with special characters
     genreSelect.addEventListener('change', function() {
         const genre = this.value;
         const rating = ratingSelect.value;
         let url = '?page=movies&filter=' + filter;
         
         if (genre && genre !== 'all') {
-            // Properly URL encode the genre value to preserve special characters
             url += '&genre=' + encodeURIComponent(genre);
         }
         

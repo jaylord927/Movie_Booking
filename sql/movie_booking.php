@@ -1,5 +1,5 @@
 -- =====================================================
--- DATABASE: movie_booking
+-- DATABASE: movie_booking (WITH VENUE SEPARATION)
 -- =====================================================
 
 CREATE DATABASE IF NOT EXISTS movie_booking;
@@ -25,7 +25,21 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- =====================================================
--- 2. MOVIES TABLE (Updated with venue_photo_path)
+-- 2. VENUES TABLE (NEW - Separated from movies)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS venues (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    venue_name VARCHAR(255) NOT NULL UNIQUE,
+    venue_location VARCHAR(500) NOT NULL,
+    google_maps_link VARCHAR(500) NULL,
+    venue_photo_path VARCHAR(500) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_venue_name (venue_name)
+);
+
+-- =====================================================
+-- 3. MOVIES TABLE (Updated with venue_id instead of venue columns)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS movies (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -37,10 +51,7 @@ CREATE TABLE IF NOT EXISTS movies (
     description TEXT,
     poster_url VARCHAR(500),
     trailer_url VARCHAR(500),
-    venue_name VARCHAR(255),
-    venue_location VARCHAR(500),
-    google_maps_link VARCHAR(500),
-    venue_photo_path VARCHAR(500) NULL,
+    venue_id INT NULL,                              -- Foreign key to venues table
     standard_price DECIMAL(10,2) DEFAULT 350.00,
     premium_price DECIMAL(10,2) DEFAULT 450.00,
     sweet_spot_price DECIMAL(10,2) DEFAULT 550.00,
@@ -49,16 +60,21 @@ CREATE TABLE IF NOT EXISTS movies (
     updated_by INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_updated TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE SET NULL,
     FOREIGN KEY (added_by) REFERENCES users(u_id) ON DELETE SET NULL,
-    FOREIGN KEY (updated_by) REFERENCES users(u_id) ON DELETE SET NULL
+    FOREIGN KEY (updated_by) REFERENCES users(u_id) ON DELETE SET NULL,
+    INDEX idx_venue_id (venue_id),
+    INDEX idx_is_active (is_active),
+    FULLTEXT INDEX idx_movie_search (title, description)
 );
 
 -- =====================================================
--- 3. MOVIE SCHEDULES TABLE
+-- 4. MOVIE SCHEDULES TABLE (Updated with venue_id)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS movie_schedules (
     id INT AUTO_INCREMENT PRIMARY KEY,
     movie_id INT NOT NULL,
+    venue_id INT NULL,                              
     movie_title VARCHAR(255) NOT NULL,
     show_date DATE NOT NULL,
     showtime TIME NOT NULL,
@@ -66,16 +82,22 @@ CREATE TABLE IF NOT EXISTS movie_schedules (
     available_seats INT DEFAULT 40,
     is_active BOOLEAN DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
+    FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+    FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE SET NULL,
+    INDEX idx_show_date (show_date),
+    INDEX idx_movie_id (movie_id),
+    INDEX idx_venue_id (venue_id),
+    INDEX idx_show_datetime (show_date, showtime)
 );
 
 -- =====================================================
--- 4. BOOKINGS TABLE (Updated with QR code & attendance)
+-- 5. BOOKINGS TABLE (Updated with venue_id)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS tbl_booking (
     b_id INT AUTO_INCREMENT PRIMARY KEY,
     u_id INT NOT NULL,
     movie_name VARCHAR(255) NOT NULL,
+    venue_id INT NULL,                              
     show_date DATE,
     showtime TIME NOT NULL,
     booking_fee DECIMAL(10,2) DEFAULT 0,
@@ -90,6 +112,7 @@ CREATE TABLE IF NOT EXISTS tbl_booking (
     verified_by INT NULL,
     FOREIGN KEY (u_id) REFERENCES users(u_id) ON DELETE CASCADE,
     FOREIGN KEY (verified_by) REFERENCES users(u_id) ON DELETE SET NULL,
+    FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE SET NULL,
     INDEX idx_user_id (u_id),
     INDEX idx_booking_reference (booking_reference),
     INDEX idx_status (status),
@@ -97,11 +120,12 @@ CREATE TABLE IF NOT EXISTS tbl_booking (
     INDEX idx_attendance_status (attendance_status),
     INDEX idx_show_date (show_date),
     INDEX idx_is_visible (is_visible),
-    INDEX idx_qr_code (qr_code)
+    INDEX idx_qr_code (qr_code),
+    INDEX idx_venue_id (venue_id)
 );
 
 -- =====================================================
--- 5. BOOKED SEATS TABLE
+-- 6. BOOKED SEATS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS booked_seats (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -116,11 +140,12 @@ CREATE TABLE IF NOT EXISTS booked_seats (
 );
 
 -- =====================================================
--- 6. SEAT AVAILABILITY TABLE
+-- 7. SEAT AVAILABILITY TABLE (Updated with venue_id)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS seat_availability (
     id INT AUTO_INCREMENT PRIMARY KEY,
     schedule_id INT NOT NULL,
+    venue_id INT NULL,                              
     movie_title VARCHAR(255) NOT NULL,
     show_date DATE NOT NULL,
     showtime TIME NOT NULL,
@@ -129,11 +154,15 @@ CREATE TABLE IF NOT EXISTS seat_availability (
     price DECIMAL(10,2) DEFAULT 350.00,
     is_available BOOLEAN DEFAULT 1,
     booking_id INT,
-    FOREIGN KEY (schedule_id) REFERENCES movie_schedules(id) ON DELETE CASCADE
+    FOREIGN KEY (schedule_id) REFERENCES movie_schedules(id) ON DELETE CASCADE,
+    FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE SET NULL,
+    INDEX idx_schedule_id (schedule_id),
+    INDEX idx_venue_id (venue_id),
+    INDEX idx_availability (schedule_id, seat_number, is_available)
 );
 
 -- =====================================================
--- 7. ADMIN ACTIVITY LOG
+-- 8. ADMIN ACTIVITY LOG
 -- =====================================================
 CREATE TABLE IF NOT EXISTS admin_activity_log (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -143,11 +172,14 @@ CREATE TABLE IF NOT EXISTS admin_activity_log (
     full_details TEXT NULL,
     target_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (admin_id) REFERENCES users(u_id) ON DELETE CASCADE
+    FOREIGN KEY (admin_id) REFERENCES users(u_id) ON DELETE CASCADE,
+    INDEX idx_admin_id (admin_id),
+    INDEX idx_created_at (created_at),
+    INDEX idx_action (action)
 );
 
 -- =====================================================
--- 8. CUSTOMER ACTIVITY LOG
+-- 9. CUSTOMER ACTIVITY LOG
 -- =====================================================
 CREATE TABLE IF NOT EXISTS customer_activity_log (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -161,11 +193,14 @@ CREATE TABLE IF NOT EXISTS customer_activity_log (
     FOREIGN KEY (customer_id) REFERENCES users(u_id) ON DELETE CASCADE,
     FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE SET NULL,
     FOREIGN KEY (schedule_id) REFERENCES movie_schedules(id) ON DELETE SET NULL,
-    FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE SET NULL
+    FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE SET NULL,
+    INDEX idx_customer_id (customer_id),
+    INDEX idx_action_type (action_type),
+    INDEX idx_created_at (created_at)
 );
 
 -- =====================================================
--- 9. STAFF ACTIVITY LOG (NEW)
+-- 10. STAFF ACTIVITY LOG
 -- =====================================================
 CREATE TABLE IF NOT EXISTS staff_activity_log (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -175,11 +210,14 @@ CREATE TABLE IF NOT EXISTS staff_activity_log (
     details TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (staff_id) REFERENCES users(u_id) ON DELETE CASCADE,
-    FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE SET NULL
+    FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE SET NULL,
+    INDEX idx_staff_id (staff_id),
+    INDEX idx_booking_id (booking_id),
+    INDEX idx_created_at (created_at)
 );
 
 -- =====================================================
--- 10. SUGGESTIONS TABLE
+-- 11. SUGGESTIONS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS suggestions (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -190,11 +228,13 @@ CREATE TABLE IF NOT EXISTS suggestions (
     status ENUM('Pending', 'Reviewed', 'Implemented') DEFAULT 'Pending',
     admin_notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE SET NULL
+    FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE SET NULL,
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at)
 );
 
 -- =====================================================
--- 11. PAYMENT METHODS TABLE
+-- 12. PAYMENT METHODS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS payment_methods (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -206,11 +246,13 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     is_active BOOLEAN DEFAULT 1,
     display_order INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_is_active (is_active),
+    INDEX idx_display_order (display_order)
 );
 
 -- =====================================================
--- 12. MANUAL PAYMENTS TABLE
+-- 13. MANUAL PAYMENTS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS manual_payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -228,11 +270,15 @@ CREATE TABLE IF NOT EXISTS manual_payments (
     FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE CASCADE,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE CASCADE,
-    FOREIGN KEY (verified_by) REFERENCES users(u_id) ON DELETE SET NULL
+    FOREIGN KEY (verified_by) REFERENCES users(u_id) ON DELETE SET NULL,
+    INDEX idx_status (status),
+    INDEX idx_booking_id (booking_id),
+    INDEX idx_user_id (user_id),
+    INDEX idx_created_at (created_at)
 );
 
 -- =====================================================
--- 13. PAYMONGO PAYMENTS TABLE
+-- 14. PAYMONGO PAYMENTS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS paymongo_payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -251,5 +297,8 @@ CREATE TABLE IF NOT EXISTS paymongo_payments (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (booking_id) REFERENCES tbl_booking(b_id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(u_id) ON DELETE CASCADE,
+    INDEX idx_status (status),
+    INDEX idx_booking_id (booking_id),
+    INDEX idx_user_id (user_id)
 );

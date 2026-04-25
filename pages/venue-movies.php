@@ -6,7 +6,9 @@ require_once $root_dir . '/partials/header.php';
 
 $conn = get_db_connection();
 
-// Get venue name from URL
+// ============================================
+// UPDATED: Get venue by name from URL, then find by ID
+// ============================================
 $venue_name = isset($_GET['venue']) ? urldecode($_GET['venue']) : '';
 
 if (empty($venue_name)) {
@@ -14,12 +16,11 @@ if (empty($venue_name)) {
     exit();
 }
 
-// Get venue details
+// First, get the venue ID from the venues table
 $venue_stmt = $conn->prepare("
-    SELECT DISTINCT venue_name, venue_location, google_maps_link 
-    FROM movies 
-    WHERE venue_name = ? AND is_active = 1 
-    LIMIT 1
+    SELECT id, venue_name, venue_location, google_maps_link, venue_photo_path 
+    FROM venues 
+    WHERE venue_name = ?
 ");
 $venue_stmt->bind_param("s", $venue_name);
 $venue_stmt->execute();
@@ -28,18 +29,45 @@ $venue = $venue_result->fetch_assoc();
 $venue_stmt->close();
 
 if (!$venue) {
+    // If venue not found by name, try to redirect to venues page
     header("Location: " . SITE_URL . "index.php?page=venue");
     exit();
 }
 
-// Get all movies for this venue
+// ============================================
+// Generate embed URL from Google Maps link for visual map display
+// ============================================
+$embed_url = '';
+$has_valid_map = false;
+
+if (!empty($venue['google_maps_link'])) {
+    // Try to extract coordinates from Google Maps link
+    if (preg_match('/q=([0-9.-]+),([0-9.-]+)/', $venue['google_maps_link'], $matches)) {
+        $lat = $matches[1];
+        $lng = $matches[2];
+        $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
+        $has_valid_map = true;
+    } elseif (preg_match('/@([0-9.-]+),([0-9.-]+)/', $venue['google_maps_link'], $matches)) {
+        $lat = $matches[1];
+        $lng = $matches[2];
+        $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
+        $has_valid_map = true;
+    } else {
+        $embed_url = "https://maps.google.com/maps?q=" . urlencode($venue['venue_location'] ?? $venue['venue_name'] ?? '') . "&z=15&output=embed";
+        $has_valid_map = true;
+    }
+}
+
+// ============================================
+// UPDATED: Get movies by venue_id instead of venue_name string
+// ============================================
 $movies_stmt = $conn->prepare("
     SELECT m.* 
     FROM movies m
-    WHERE m.venue_name = ? AND m.is_active = 1
+    WHERE m.venue_id = ? AND m.is_active = 1
     ORDER BY m.created_at DESC
 ");
-$movies_stmt->bind_param("s", $venue_name);
+$movies_stmt->bind_param("i", $venue['id']);
 $movies_stmt->execute();
 $movies_result = $movies_stmt->get_result();
 
@@ -49,7 +77,9 @@ while ($row = $movies_result->fetch_assoc()) {
 }
 $movies_stmt->close();
 
+// ============================================
 // Fetch schedules for movies
+// ============================================
 $schedules = [];
 foreach ($movies as $movie) {
     $schedule_stmt = $conn->prepare("
@@ -68,7 +98,9 @@ foreach ($movies as $movie) {
     $schedule_stmt->close();
 }
 
+// ============================================
 // Check which movies have schedules (Now Showing)
+// ============================================
 $now_showing_ids = [];
 foreach ($movies as $movie) {
     if (!empty($schedules[$movie['id']])) {
@@ -87,9 +119,10 @@ $conn->close();
         </a>
     </div>
 
-    <!-- Venue Header -->
+    <!-- Venue Header with Venue Photo and Map side by side -->
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 20px; padding: 30px; margin-bottom: 30px; border: 1px solid rgba(226, 48, 32, 0.3);">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px;">
+        <!-- Venue Title and Info -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 25px;">
             <div>
                 <h1 style="color: white; font-size: 2rem; margin-bottom: 10px; font-weight: 800;">
                     <i class="fas fa-building" style="color: var(--primary-red);"></i> 
@@ -100,15 +133,87 @@ $conn->close();
                     <i class="fas fa-map-pin"></i> <?php echo htmlspecialchars($venue['venue_location']); ?>
                 </p>
                 <?php endif; ?>
+                <?php if (!empty($movies)): ?>
+                <p style="color: #2ecc71; font-size: 0.9rem; margin-top: 5px;">
+                    <i class="fas fa-film"></i> <?php echo count($movies); ?> movie<?php echo count($movies) != 1 ? 's' : ''; ?> currently available
+                </p>
+                <?php endif; ?>
             </div>
-            <?php if (!empty($venue['google_maps_link'])): ?>
-            <a href="<?php echo htmlspecialchars($venue['google_maps_link']); ?>" target="_blank" 
-               style="background: #e74c3c; color: white; padding: 12px 25px; border-radius: 10px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 10px; transition: all 0.3s ease;"
-               onmouseover="this.style.background='#c0392b'; this.style.transform='translateY(-2px)';"
-               onmouseout="this.style.background='#e74c3c'; this.style.transform='translateY(0)';">
-                <i class="fas fa-map-marked-alt"></i> Open in Google Maps
-            </a>
-            <?php endif; ?>
+            
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <?php if (!empty($venue['google_maps_link'])): ?>
+                <a href="<?php echo htmlspecialchars($venue['google_maps_link']); ?>" target="_blank" 
+                   style="background: #e74c3c; color: white; padding: 12px 25px; border-radius: 10px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 10px; transition: all 0.3s ease;"
+                   onmouseover="this.style.background='#c0392b'; this.style.transform='translateY(-2px)';"
+                   onmouseout="this.style.background='#e74c3c'; this.style.transform='translateY(0)';">
+                    <i class="fas fa-map-marked-alt"></i> Open in Google Maps
+                </a>
+                <?php endif; ?>
+            </div>
+        </div>
+        
+        <!-- Two Column Layout: Venue Photo + Google Map (like venue.php) -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px;">
+            <!-- Venue Photo Column -->
+            <div>
+                <?php if (!empty($venue['venue_photo_path'])): ?>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 12px; padding: 20px; height: 100%;">
+                    <div style="color: white; font-weight: 600; margin-bottom: 12px; font-size: 0.9rem;">
+                        <i class="fas fa-camera"></i> Venue Photo
+                    </div>
+                    <div style="text-align: center; overflow: hidden; border-radius: 10px; cursor: pointer;" 
+                         onclick="openFullImage('<?php echo SITE_URL . $venue['venue_photo_path']; ?>', '<?php echo htmlspecialchars($venue['venue_name']); ?>')">
+                        <img src="<?php echo SITE_URL . $venue['venue_photo_path']; ?>" 
+                             alt="<?php echo htmlspecialchars($venue['venue_name']); ?> Photo"
+                             style="width: 100%; height: 250px; object-fit: cover; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3); transition: transform 0.3s ease; cursor: pointer;"
+                             onmouseover="this.style.transform='scale(1.02)';"
+                             onmouseout="this.style.transform='scale(1)';">
+                    </div>
+                    <div style="margin-top: 10px; text-align: center;">
+                        <span style="color: var(--pale-red); font-size: 0.75rem; cursor: pointer;" onclick="openFullImage('<?php echo SITE_URL . $venue['venue_photo_path']; ?>', '<?php echo htmlspecialchars($venue['venue_name']); ?>')">
+                            <i class="fas fa-search-plus"></i> Click photo to view full size
+                        </span>
+                    </div>
+                </div>
+                <?php else: ?>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 12px; padding: 20px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 300px;">
+                    <i class="fas fa-camera" style="font-size: 3rem; color: rgba(255,255,255,0.15); margin-bottom: 10px;"></i>
+                    <p style="color: rgba(255,255,255,0.3); font-size: 0.9rem;">No venue photo available</p>
+                </div>
+                <?php endif; ?>
+            </div>
+            
+            <!-- Google Maps Column -->
+            <div>
+                <?php if ($has_valid_map && !empty($embed_url)): ?>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 12px; padding: 20px; height: 100%; display: flex; flex-direction: column;">
+                    <div style="color: white; font-weight: 600; margin-bottom: 12px; font-size: 0.9rem;">
+                        <i class="fas fa-map-marked-alt"></i> Location Map
+                    </div>
+                    <div style="position: relative; border-radius: 10px; overflow: hidden; border: 2px solid rgba(226, 48, 32, 0.3); flex: 1;">
+                        <iframe 
+                            src="<?php echo $embed_url; ?>"
+                            style="width: 100%; height: 250px; border: 0; display: block;"
+                            allowfullscreen="" 
+                            loading="lazy">
+                        </iframe>
+                    </div>
+                    <div style="margin-top: 10px; text-align: center;">
+                        <a href="<?php echo htmlspecialchars($venue['google_maps_link']); ?>" target="_blank" 
+                           style="color: var(--light-red); font-size: 0.8rem; text-decoration: none; display: inline-flex; align-items: center; gap: 5px;"
+                           onmouseover="this.style.textDecoration='underline';"
+                           onmouseout="this.style.textDecoration='none';">
+                            <i class="fas fa-external-link-alt"></i> Open in Google Maps
+                        </a>
+                    </div>
+                </div>
+                <?php else: ?>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 12px; padding: 20px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 300px;">
+                    <i class="fas fa-map-marker-alt" style="font-size: 3rem; color: rgba(255,255,255,0.15); margin-bottom: 10px;"></i>
+                    <p style="color: rgba(255,255,255,0.3); font-size: 0.9rem; text-align: center;">No map link available</p>
+                </div>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 
@@ -220,11 +325,47 @@ $conn->close();
                             <?php endif; ?>
                         <?php endif; ?>
                     </div>
+                    
+                    <!-- Venue badge on movie card -->
+                    <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <div style="display: flex; align-items: center; gap: 5px; color: var(--pale-red); font-size: 0.7rem;">
+                            <i class="fas fa-building"></i> Playing at: <?php echo htmlspecialchars($venue['venue_name']); ?>
+                        </div>
+                    </div>
                 </div>
             </div>
             <?php endforeach; ?>
         </div>
+        
+        <div style="text-align: center; margin-top: 40px; padding: 20px; background: rgba(226, 48, 32, 0.05); border-radius: 10px; border: 1px solid rgba(226, 48, 32, 0.2);">
+            <p style="color: var(--pale-red); font-size: 1rem;">
+                Showing <strong style="color: white;"><?php echo count($movies); ?></strong> movie(s) at 
+                <strong style="color: var(--primary-red);"><?php echo htmlspecialchars($venue['venue_name']); ?></strong>
+            </p>
+            <?php if ($has_valid_map && !empty($venue['google_maps_link'])): ?>
+            <p style="margin-top: 10px;">
+                <a href="<?php echo htmlspecialchars($venue['google_maps_link']); ?>" target="_blank" 
+                   style="color: #3498db; text-decoration: none; font-size: 0.85rem;">
+                    <i class="fas fa-directions"></i> Get Directions to this Venue
+                </a>
+            </p>
+            <?php endif; ?>
+        </div>
     <?php endif; ?>
+</div>
+
+<!-- Full Image Modal -->
+<div id="imageModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 10000; justify-content: center; align-items: center; cursor: pointer; padding: 20px;"
+     onclick="closeFullImage()">
+    <div style="max-width: 90%; max-height: 90%; text-align: center;">
+        <img id="fullImage" src="" alt="" style="max-width: 100%; max-height: 80vh; border-radius: 10px; border: 3px solid var(--primary-red);">
+        <div style="margin-top: 20px; color: white;">
+            <p id="imageCaption" style="margin-bottom: 10px;"></p>
+            <span style="background: rgba(255,255,255,0.2); padding: 8px 20px; border-radius: 30px; font-size: 0.9rem;">
+                <i class="fas fa-times-circle"></i> Click anywhere to close
+            </span>
+        </div>
+    </div>
 </div>
 
 <style>
@@ -308,6 +449,10 @@ $conn->close();
         padding: 15px;
     }
     
+    .venue-movies-container > div:first-child > div:first-child > div:first-child {
+        grid-template-columns: 1fr;
+    }
+    
     .venue-movies-container > div:last-child {
         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: 20px;
@@ -318,6 +463,15 @@ $conn->close();
     .venue-movies-container > div:last-child {
         grid-template-columns: 1fr;
     }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+#imageModal {
+    animation: fadeIn 0.3s ease;
 }
 </style>
 
@@ -341,6 +495,34 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+});
+
+function openFullImage(imageUrl, venueName) {
+    const modal = document.getElementById('imageModal');
+    const fullImage = document.getElementById('fullImage');
+    const caption = document.getElementById('imageCaption');
+    
+    fullImage.src = imageUrl;
+    caption.innerHTML = `<i class="fas fa-building"></i> ${escapeHtml(venueName)} - Venue Photo`;
+    modal.style.display = 'flex';
+}
+
+function closeFullImage() {
+    const modal = document.getElementById('imageModal');
+    modal.style.display = 'none';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeFullImage();
+    }
 });
 </script>
 

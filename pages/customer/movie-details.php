@@ -12,11 +12,20 @@ if ($movie_id <= 0) {
     exit();
 }
 
+// ============================================
+// UPDATED QUERY: Get movie with venue information from venues table
+// ============================================
 $stmt = $conn->prepare("
     SELECT m.*, 
+           v.id as venue_id,
+           v.venue_name, 
+           v.venue_location, 
+           v.google_maps_link,
+           v.venue_photo_path,
            a.u_name as added_by_name,
            u.u_name as updated_by_name
     FROM movies m
+    LEFT JOIN venues v ON m.venue_id = v.id
     LEFT JOIN users a ON m.added_by = a.u_id
     LEFT JOIN users u ON m.updated_by = u.u_id
     WHERE m.id = ? AND m.is_active = 1
@@ -34,6 +43,9 @@ if ($result->num_rows === 0) {
 $movie = $result->fetch_assoc();
 $stmt->close();
 
+// ============================================
+// Get schedules for this movie
+// ============================================
 $schedules_stmt = $conn->prepare("
     SELECT * FROM movie_schedules 
     WHERE movie_id = ? 
@@ -58,14 +70,17 @@ require_once $root_dir . '/partials/header.php';
 ?>
 
 <div class="movie-details-container" style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+    <!-- Back Button -->
     <div style="margin-bottom: 30px;">
         <a href="javascript:history.back()" style="color: var(--light-red); text-decoration: none; display: inline-flex; align-items: center; gap: 8px; font-weight: 600;">
             <i class="fas fa-arrow-left"></i> Back
         </a>
     </div>
 
+    <!-- Movie Main Details -->
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 20px; padding: 30px; border: 1px solid rgba(226, 48, 32, 0.3); margin-bottom: 40px;">
         <div style="display: grid; grid-template-columns: 300px 1fr; gap: 40px;">
+            <!-- Movie Poster -->
             <div>
                 <?php if (!empty($movie['poster_url'])): ?>
                     <img src="<?php echo $movie['poster_url']; ?>" 
@@ -78,6 +93,7 @@ require_once $root_dir . '/partials/header.php';
                 <?php endif; ?>
             </div>
             
+            <!-- Movie Info -->
             <div>
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
                     <h1 style="color: white; font-size: 2.5rem; font-weight: 800; line-height: 1.2;">
@@ -109,6 +125,7 @@ require_once $root_dir . '/partials/header.php';
                     </div>
                 </div>
                 
+                <!-- Synopsis -->
                 <div style="margin-bottom: 30px;">
                     <h3 style="color: white; font-size: 1.3rem; margin-bottom: 15px; font-weight: 700;">Synopsis</h3>
                     <p style="color: rgba(255,255,255,0.9); line-height: 1.8; font-size: 1rem;">
@@ -116,6 +133,7 @@ require_once $root_dir . '/partials/header.php';
                     </p>
                 </div>
                 
+                <!-- Action Buttons -->
                 <div style="display: flex; gap: 15px; flex-wrap: wrap;">
                     <?php if (!empty($movie['trailer_url'])): ?>
                         <a href="<?php echo $movie['trailer_url']; ?>" target="_blank" class="btn btn-secondary" style="padding: 15px 30px;">
@@ -137,6 +155,7 @@ require_once $root_dir . '/partials/header.php';
         </div>
     </div>
 
+    <!-- Trailer Section -->
     <?php if (!empty($movie['trailer_url'])): ?>
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 20px; padding: 30px; border: 1px solid rgba(226, 48, 32, 0.3); margin-bottom: 40px;">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
@@ -160,7 +179,10 @@ require_once $root_dir . '/partials/header.php';
     </div>
     <?php endif; ?>
 
-    <!-- Venue Information Section with Venue Photo -->
+    <!-- ============================================
+         VENUE INFORMATION SECTION (UPDATED)
+         Now displays venue info from venues table
+    ============================================= -->
     <?php if (!empty($movie['venue_name']) || !empty($movie['venue_location']) || !empty($movie['google_maps_link']) || !empty($movie['venue_photo_path'])): ?>
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 20px; padding: 30px; border: 1px solid rgba(226, 48, 32, 0.3); margin-bottom: 40px;">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
@@ -173,14 +195,18 @@ require_once $root_dir . '/partials/header.php';
                 <?php if (!empty($movie['venue_name'])): ?>
                 <div style="margin-bottom: 20px;">
                     <div style="color: var(--pale-red); font-size: 0.9rem; margin-bottom: 5px;">Venue Name</div>
-                    <div style="color: white; font-size: 1.3rem; font-weight: 700;"><?php echo htmlspecialchars($movie['venue_name']); ?></div>
+                    <div style="color: white; font-size: 1.3rem; font-weight: 700;">
+                        <?php echo htmlspecialchars($movie['venue_name']); ?>
+                    </div>
                 </div>
                 <?php endif; ?>
                 
                 <?php if (!empty($movie['venue_location'])): ?>
                 <div style="margin-bottom: 20px;">
                     <div style="color: var(--pale-red); font-size: 0.9rem; margin-bottom: 5px;">Location</div>
-                    <div style="color: white; font-size: 1.1rem;"><?php echo htmlspecialchars($movie['venue_location']); ?></div>
+                    <div style="color: white; font-size: 1.1rem;">
+                        <?php echo htmlspecialchars($movie['venue_location']); ?>
+                    </div>
                 </div>
                 <?php endif; ?>
                 
@@ -195,7 +221,7 @@ require_once $root_dir . '/partials/header.php';
                 <?php endif; ?>
             </div>
             
-            <!-- Right Column: Venue Photo - MODIFIED with click-to-expand -->
+            <!-- Right Column: Venue Photo -->
             <div>
                 <?php if (!empty($movie['venue_photo_path'])): ?>
                 <div style="background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;">
@@ -215,13 +241,18 @@ require_once $root_dir . '/partials/header.php';
                         </span>
                     </div>
                 </div>
+                <?php else: ?>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px; text-align: center;">
+                    <i class="fas fa-camera" style="font-size: 3rem; color: rgba(255,255,255,0.2); margin-bottom: 10px;"></i>
+                    <p style="color: rgba(255,255,255,0.5);">No venue photo available</p>
+                </div>
                 <?php endif; ?>
             </div>
         </div>
 
         <!-- Embedded Map (if available) - Below both columns -->
         <?php if (!empty($movie['google_maps_link'])): 
-            // Extract coordinates from Google Maps link
+            // Extract coordinates from Google Maps link for embedded map
             $embed_url = '';
             if (preg_match('/q=([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
                 $lat = $matches[1];
@@ -364,7 +395,7 @@ require_once $root_dir . '/partials/header.php';
     </div>
 </div>
 
-<!-- Full Image Modal -->
+<!-- Full Image Modal for Venue Photo -->
 <div id="imageModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 10000; justify-content: center; align-items: center; cursor: pointer; padding: 20px;"
      onclick="closeFullImage()">
     <div style="max-width: 90%; max-height: 90%; text-align: center;">
