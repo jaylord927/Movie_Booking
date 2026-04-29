@@ -9,33 +9,75 @@ $conn = get_db_connection();
 // Get search term
 $search = isset($_GET['search']) ? sanitize_input($_GET['search']) : '';
 
-// ============================================
-// UPDATED QUERY: Get all venues from venues table
-// ============================================
-$venue_query = "SELECT * FROM venues";
+// Get all venues with their screen counts and movie counts
+$venue_query = "
+    SELECT 
+        v.*,
+        COUNT(DISTINCT s.id) as total_screens,
+        COUNT(DISTINCT CASE WHEN s.is_active = 1 THEN s.id END) as active_screens,
+        COUNT(DISTINCT sch.id) as total_schedules,
+        COUNT(DISTINCT sch.movie_id) as unique_movies,
+        COALESCE(SUM(CASE WHEN sch.show_date >= CURDATE() THEN 1 ELSE 0 END), 0) as upcoming_shows
+    FROM venues v
+    LEFT JOIN screens s ON v.id = s.venue_id
+    LEFT JOIN schedules sch ON s.id = sch.screen_id AND sch.is_active = 1
+    WHERE v.is_active = 1
+";
 
 if (!empty($search)) {
     $search_escaped = $conn->real_escape_string($search);
-    $venue_query .= " WHERE venue_name LIKE '%$search_escaped%' OR venue_location LIKE '%$search_escaped%'";
+    $venue_query .= " AND (v.venue_name LIKE '%$search_escaped%' OR v.venue_location LIKE '%$search_escaped%')";
 }
 
-$venue_query .= " ORDER BY venue_name";
+$venue_query .= " GROUP BY v.id ORDER BY v.venue_name";
 $venues_result = $conn->query($venue_query);
 
 $venues = [];
 if ($venues_result) {
     while ($row = $venues_result->fetch_assoc()) {
-        // Get movie count for this venue
-        $movie_count_stmt = $conn->prepare("SELECT COUNT(*) as count FROM movies WHERE venue_id = ? AND is_active = 1");
-        $movie_count_stmt->bind_param("i", $row['id']);
-        $movie_count_stmt->execute();
-        $movie_count_result = $movie_count_stmt->get_result();
-        $movie_count = $movie_count_result->fetch_assoc()['count'];
-        $movie_count_stmt->close();
-        
-        $row['movie_count'] = $movie_count;
         $venues[] = $row;
     }
+}
+
+// For each venue, get upcoming movie schedules
+$venue_schedules = [];
+foreach ($venues as $venue) {
+    $schedule_query = $conn->prepare("
+        SELECT 
+            sch.id as schedule_id,
+            sch.show_date,
+            sch.showtime,
+            m.id as movie_id,
+            m.title as movie_title,
+            m.poster_url,
+            m.rating,
+            m.duration,
+            m.genre,
+            s.screen_name,
+            s.screen_number,
+            COUNT(sa.id) as total_seats,
+            COUNT(CASE WHEN sa.status = 'available' THEN 1 END) as available_seats
+        FROM schedules sch
+        JOIN movies m ON sch.movie_id = m.id
+        JOIN screens s ON sch.screen_id = s.id
+        LEFT JOIN seat_availability sa ON sch.id = sa.schedule_id
+        WHERE s.venue_id = ? 
+        AND sch.is_active = 1 
+        AND sch.show_date >= CURDATE()
+        AND m.is_active = 1
+        GROUP BY sch.id, sch.show_date, sch.showtime, m.id, m.title, m.poster_url, m.rating, m.duration, m.genre, s.screen_name, s.screen_number
+        ORDER BY sch.show_date, sch.showtime
+        LIMIT 10
+    ");
+    $schedule_query->bind_param("i", $venue['id']);
+    $schedule_query->execute();
+    $schedules_result = $schedule_query->get_result();
+    
+    $venue_schedules[$venue['id']] = [];
+    while ($row = $schedules_result->fetch_assoc()) {
+        $venue_schedules[$venue['id']][] = $row;
+    }
+    $schedule_query->close();
 }
 
 $conn->close();
@@ -105,7 +147,7 @@ $conn->close();
     <?php else: ?>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(550px, 1fr)); gap: 30px;">
             <?php foreach ($venues as $venue): 
-                // Generate embed URL from Google Maps link with full features
+                // Generate embed URL from Google Maps link
                 $embed_url = '';
                 $has_valid_map = false;
                 
@@ -142,15 +184,23 @@ $conn->close();
                         </div>
                         <div style="flex: 1;">
                             <h2 style="color: white; font-size: 1.5rem; font-weight: 700;"><?php echo htmlspecialchars($venue['venue_name']); ?></h2>
-                            <?php if ($venue['movie_count'] > 0): ?>
-                            <span style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; padding: 3px 10px; border-radius: 15px; font-size: 0.7rem; font-weight: 600;">
-                                <i class="fas fa-film"></i> <?php echo $venue['movie_count']; ?> movie<?php echo $venue['movie_count'] != 1 ? 's' : ''; ?> showing
-                            </span>
-                            <?php else: ?>
-                            <span style="background: rgba(149, 165, 166, 0.2); color: #95a5a6; padding: 3px 10px; border-radius: 15px; font-size: 0.7rem; font-weight: 600;">
-                                <i class="fas fa-clock"></i> No movies currently
-                            </span>
-                            <?php endif; ?>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 5px;">
+                                <?php if ($venue['total_screens'] > 0): ?>
+                                <span style="background: rgba(52, 152, 219, 0.2); color: #3498db; padding: 3px 10px; border-radius: 15px; font-size: 0.7rem; font-weight: 600;">
+                                    <i class="fas fa-tv"></i> <?php echo $venue['total_screens']; ?> screen(s)
+                                </span>
+                                <?php endif; ?>
+                                <?php if ($venue['unique_movies'] > 0): ?>
+                                <span style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; padding: 3px 10px; border-radius: 15px; font-size: 0.7rem; font-weight: 600;">
+                                    <i class="fas fa-film"></i> <?php echo $venue['unique_movies']; ?> movie(s)
+                                </span>
+                                <?php endif; ?>
+                                <?php if ($venue['upcoming_shows'] > 0): ?>
+                                <span style="background: rgba(241, 196, 15, 0.2); color: #f1c40f; padding: 3px 10px; border-radius: 15px; font-size: 0.7rem; font-weight: 600;">
+                                    <i class="fas fa-calendar"></i> <?php echo $venue['upcoming_shows']; ?> upcoming
+                                </span>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                     
@@ -169,6 +219,13 @@ $conn->close();
                             <span style="color: var(--pale-red); font-weight: 600;">Location (Same as Venue Name):</span>
                         </div>
                         <p style="color: white; line-height: 1.6;"><?php echo htmlspecialchars($venue['venue_location']); ?></p>
+                    </div>
+                    <?php endif; ?>
+                    
+                    <?php if (!empty($venue['operating_hours'])): ?>
+                    <div style="margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                        <i class="fas fa-clock" style="color: var(--primary-red); margin-right: 8px;"></i>
+                        <span style="color: rgba(255,255,255,0.7); font-size: 0.85rem;"><?php echo htmlspecialchars($venue['operating_hours']); ?></span>
                     </div>
                     <?php endif; ?>
                 </div>
@@ -237,6 +294,54 @@ $conn->close();
                     </div>
                 </div>
                 
+                <!-- Upcoming Movies Section -->
+                <?php if (!empty($venue_schedules[$venue['id']])): ?>
+                <div style="padding: 0 25px 15px 25px;">
+                    <h4 style="color: #2ecc71; font-size: 0.9rem; margin-bottom: 10px;">
+                        <i class="fas fa-film"></i> Now Showing & Upcoming:
+                    </h4>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <?php 
+                        $displayed_movies = [];
+                        foreach ($venue_schedules[$venue['id']] as $schedule):
+                            if (in_array($schedule['movie_id'], $displayed_movies)) continue;
+                            $displayed_movies[] = $schedule['movie_id'];
+                        ?>
+                        <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+                            <?php if (!empty($schedule['poster_url'])): ?>
+                            <img src="<?php echo $schedule['poster_url']; ?>" 
+                                 alt="<?php echo htmlspecialchars($schedule['movie_title']); ?>"
+                                 style="width: 40px; height: 50px; object-fit: cover; border-radius: 5px;">
+                            <?php else: ?>
+                            <div style="width: 40px; height: 50px; background: rgba(52,152,219,0.1); border-radius: 5px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fas fa-film" style="color: rgba(255,255,255,0.3);"></i>
+                            </div>
+                            <?php endif; ?>
+                            <div style="flex: 1;">
+                                <div style="color: white; font-weight: 600; font-size: 0.9rem;"><?php echo htmlspecialchars($schedule['movie_title']); ?></div>
+                                <div style="display: flex; gap: 10px; font-size: 0.7rem; color: rgba(255,255,255,0.5);">
+                                    <span><?php echo $schedule['rating']; ?></span>
+                                    <span><?php echo $schedule['duration']; ?></span>
+                                </div>
+                            </div>
+                            <a href="<?php echo SITE_URL; ?>index.php?page=customer/movie-details&id=<?php echo $schedule['movie_id']; ?>" 
+                               style="color: #3498db; font-size: 0.75rem; text-decoration: none;">
+                                Details <i class="fas fa-arrow-right"></i>
+                            </a>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php if ($venue['unique_movies'] > 3): ?>
+                    <div style="text-align: center; margin-top: 10px;">
+                        <a href="<?php echo SITE_URL; ?>index.php?page=venue-movies&venue=<?php echo urlencode($venue['venue_name']); ?>" 
+                           style="color: var(--light-red); font-size: 0.8rem; text-decoration: none;">
+                            View all <?php echo $venue['unique_movies']; ?> movies <i class="fas fa-arrow-right"></i>
+                        </a>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+                
                 <!-- Action Buttons -->
                 <div style="padding: 0 25px 25px 25px; margin-top: auto;">
                     <div style="display: flex; gap: 15px; margin-top: 10px;">
@@ -245,9 +350,9 @@ $conn->close();
                            onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 5px 15px rgba(226,48,32,0.4)';"
                            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">
                             <i class="fas fa-film"></i> View All Movies
-                            <?php if ($venue['movie_count'] > 0): ?>
+                            <?php if ($venue['unique_movies'] > 0): ?>
                             <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 20px; font-size: 0.7rem;">
-                                <?php echo $venue['movie_count']; ?>
+                                <?php echo $venue['unique_movies']; ?>
                             </span>
                             <?php endif; ?>
                         </a>

@@ -9,7 +9,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'Customer') {
     exit();
 }
 
-$conn = get_db();
+$conn = get_db_connection();
 $user_id = $_SESSION['user_id'];
 
 $booking_id = isset($_GET['booking_id']) ? intval($_GET['booking_id']) : 0;
@@ -21,9 +21,9 @@ if ($booking_id <= 0) {
 
 // Update booking payment status to Paid
 $update_stmt = $conn->prepare("
-    UPDATE tbl_booking 
-    SET payment_status = 'Paid'
-    WHERE b_id = ? AND u_id = ? AND payment_status = 'Pending'
+    UPDATE bookings 
+    SET payment_status = 'paid'
+    WHERE id = ? AND user_id = ? AND payment_status = 'pending'
 ");
 $update_stmt->bind_param("ii", $booking_id, $user_id);
 $update_stmt->execute();
@@ -32,14 +32,20 @@ $update_stmt->close();
 // Get booking details for display
 $booking_stmt = $conn->prepare("
     SELECT 
-        b.*,
-        GROUP_CONCAT(bs.seat_number ORDER BY bs.seat_number SEPARATOR ', ') as seat_list,
-        m.poster_url
-    FROM tbl_booking b
-    LEFT JOIN booked_seats bs ON b.b_id = bs.booking_id
-    LEFT JOIN movies m ON b.movie_name = m.title
-    WHERE b.b_id = ? AND b.u_id = ?
-    GROUP BY b.b_id
+        b.booking_reference,
+        b.total_amount,
+        b.payment_status,
+        s.show_date,
+        s.showtime,
+        m.title as movie_title,
+        m.poster_url,
+        GROUP_CONCAT(DISTINCT bs.seat_number ORDER BY bs.seat_number SEPARATOR ', ') as seat_list
+    FROM bookings b
+    JOIN schedules s ON b.schedule_id = s.id
+    JOIN movies m ON s.movie_id = m.id
+    LEFT JOIN booked_seats bs ON b.id = bs.booking_id
+    WHERE b.id = ? AND b.user_id = ?
+    GROUP BY b.id
 ");
 $booking_stmt->bind_param("ii", $booking_id, $user_id);
 $booking_stmt->execute();
@@ -74,11 +80,11 @@ require_once $root_dir . '/partials/header.php';
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
             <div>
                 <p style="color: var(--pale-red); margin-bottom: 5px;">Booking Reference</p>
-                <p style="color: white; font-size: 1.2rem; font-weight: 700;"><?php echo $booking['booking_reference']; ?></p>
+                <p style="color: white; font-size: 1.2rem; font-weight: 700;"><?php echo htmlspecialchars($booking['booking_reference']); ?></p>
             </div>
             <div>
                 <p style="color: var(--pale-red); margin-bottom: 5px;">Movie</p>
-                <p style="color: white; font-size: 1.2rem;"><?php echo $booking['movie_name']; ?></p>
+                <p style="color: white; font-size: 1.2rem;"><?php echo htmlspecialchars($booking['movie_title']); ?></p>
             </div>
             <div>
                 <p style="color: var(--pale-red); margin-bottom: 5px;">Show Date & Time</p>
@@ -89,12 +95,12 @@ require_once $root_dir . '/partials/header.php';
             </div>
             <div>
                 <p style="color: var(--pale-red); margin-bottom: 5px;">Seats</p>
-                <p style="color: white;"><?php echo $booking['seat_list']; ?></p>
+                <p style="color: white;"><?php echo htmlspecialchars($booking['seat_list']); ?></p>
             </div>
             <div>
                 <p style="color: var(--pale-red); margin-bottom: 5px;">Total Amount Paid</p>
                 <p style="color: #2ecc71; font-size: 1.5rem; font-weight: 800;">
-                    ₱<?php echo number_format($booking['booking_fee'], 2); ?>
+                    ₱<?php echo number_format($booking['total_amount'], 2); ?>
                 </p>
             </div>
             <div>

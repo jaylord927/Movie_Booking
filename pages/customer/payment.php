@@ -9,7 +9,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'Customer') {
     exit();
 }
 
-$conn = get_db();
+$conn = get_db_connection();  
 $user_id = $_SESSION['user_id'];
 $error = '';
 $success = '';
@@ -22,11 +22,52 @@ if ($booking_id <= 0) {
     exit();
 }
 
+// ============================================
+// TIME CHECK - PHILIPPINES TIME (Asia/Manila)
+// ============================================
+date_default_timezone_set('Asia/Manila');
+$current_hour = (int)date('H');
+$current_time_display = date('h:i A');
+$is_admin_hours = ($current_hour >= 8 && $current_hour < 17);
+
+// If NOT admin hours, block manual payment access
+if (!$is_admin_hours) {
+
+    $manual_payment_blocked = true;
+} else {
+    $manual_payment_blocked = false;
+}
+
+// Get booking details with normalized schema
 $stmt = $conn->prepare("
-    SELECT b.*, m.poster_url, m.genre, m.duration, m.rating
-    FROM tbl_booking b
-    LEFT JOIN movies m ON b.movie_name = m.title
-    WHERE b.b_id = ? AND b.u_id = ? AND b.payment_status = 'Pending'
+    SELECT 
+        b.id,
+        b.booking_reference,
+        b.total_amount,
+        b.payment_status,
+        b.status,
+        b.booked_at,
+        s.id as schedule_id,
+        s.show_date,
+        s.showtime,
+        m.title as movie_title,
+        m.poster_url,
+        m.rating,
+        m.duration,
+        v.venue_name,
+        v.venue_location,
+        sc.screen_name,
+        GROUP_CONCAT(DISTINCT bs.seat_number ORDER BY bs.seat_number SEPARATOR ', ') as seat_list,
+        COUNT(DISTINCT bs.id) as total_seats,
+        TIMESTAMPDIFF(HOUR, b.booked_at, NOW()) as hours_since_booking
+    FROM bookings b
+    JOIN schedules s ON b.schedule_id = s.id
+    JOIN movies m ON s.movie_id = m.id
+    JOIN screens sc ON s.screen_id = sc.id
+    JOIN venues v ON sc.venue_id = v.id
+    LEFT JOIN booked_seats bs ON b.id = bs.booking_id
+    WHERE b.id = ? AND b.user_id = ? AND b.payment_status = 'pending'
+    GROUP BY b.id
 ");
 $stmt->bind_param("ii", $booking_id, $user_id);
 $stmt->execute();
@@ -41,11 +82,49 @@ if ($result->num_rows === 0) {
 $booking = $result->fetch_assoc();
 $stmt->close();
 
-$current_hour = (int)date('H');
-$current_time = date('h:i A');
-$is_manual_payment_available = ($current_hour >= 8 && $current_hour < 17);
+// Check if booking is expired (more than 3 hours)
+$hours_since_booking = $booking['hours_since_booking'];
+$is_expired = $hours_since_booking >= 3;
 
-$payment_method = isset($_GET['method']) ? $_GET['method'] : '';
+if ($is_expired) {
+    // Auto-cancel expired booking
+    $cancel_stmt = $conn->prepare("
+        UPDATE bookings 
+        SET status = 'cancelled', payment_status = 'refunded' 
+        WHERE id = ? AND user_id = ?
+    ");
+    $cancel_stmt->bind_param("ii", $booking_id, $user_id);
+    $cancel_stmt->execute();
+    $cancel_stmt->close();
+    
+    // Release seats back to availability
+    $release_seats = $conn->prepare("
+        UPDATE seat_availability sa
+        JOIN booked_seats bs ON sa.id = bs.seat_availability_id
+        SET sa.status = 'available', sa.locked_by = NULL, sa.locked_at = NULL
+        WHERE bs.booking_id = ?
+    ");
+    $release_seats->bind_param("i", $booking_id);
+    $release_seats->execute();
+    $release_seats->close();
+    
+    $conn->close();
+    header("Location: " . SITE_URL . "index.php?page=customer/my-bookings&error=payment_expired");
+    exit();
+}
+
+// ============================================
+// REDIRECT TO MANUAL PAYMENT PAGE IF ADMIN HOURS
+// ============================================
+// If we're not already on manual-payment page and it's admin hours,
+// redirect to the dedicated manual payment page
+if ($is_admin_hours && !$manual_payment_blocked && !isset($_GET['manual'])) {
+    header("Location: " . SITE_URL . "index.php?page=customer/payment-manual&booking_id=" . $booking_id);
+    exit();
+}
+
+// Get payment methods (for reference, though we redirect away)
+$payment_methods = $conn->query("SELECT * FROM payment_methods WHERE is_active = 1 ORDER BY display_order");
 
 $conn->close();
 
@@ -53,10 +132,11 @@ require_once $root_dir . '/partials/header.php';
 ?>
 
 <div class="payment-container" style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+    <!-- Header -->
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
          border-radius: 15px; padding: 25px; margin-bottom: 30px; 
          border: 1px solid rgba(226, 48, 32, 0.3);">
-        <div style="display: flex; align-items: center; gap: 20px;">
+        <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
             <div style="font-size: 2.5rem; color: var(--primary-red);">
                 <i class="fas fa-credit-card"></i>
             </div>
@@ -71,157 +151,212 @@ require_once $root_dir . '/partials/header.php';
         </div>
     </div>
 
-    <?php if ($error): ?>
-        <div style="background: rgba(226, 48, 32, 0.2); color: #ff9999; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; border: 1px solid rgba(226, 48, 32, 0.3); display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-exclamation-circle fa-lg"></i>
-            <div><?php echo $error; ?></div>
-        </div>
-    <?php endif; ?>
-
-    <?php if ($success): ?>
-        <div style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; padding: 20px; border-radius: 10px; margin-bottom: 25px; border: 1px solid rgba(46, 204, 113, 0.3);">
-            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
-                <i class="fas fa-check-circle fa-2x"></i>
-                <div style="font-size: 1.1rem; font-weight: 600;"><?php echo $success; ?></div>
-            </div>
-            <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; margin-top: 15px;">
-                <p style="color: white; margin-bottom: 10px; font-weight: 600;">
-                    <i class="fas fa-info-circle"></i> Important Information:
-                </p>
-                <p style="color: var(--pale-red); margin-bottom: 5px;">
-                    • Please present your booking reference <strong><?php echo $booking['booking_reference']; ?></strong> at the cinema counter.
-                </p>
-                <p style="color: var(--pale-red); margin-bottom: 5px;">
-                    • You can also show the receipt or screenshot of this payment.
-                </p>
-                <p style="color: var(--pale-red);">
-                    • This will be your ticket for entry.
-                </p>
-            </div>
-            <div style="text-align: center; margin-top: 20px;">
-                <a href="<?php echo SITE_URL; ?>index.php?page=customer/receipt&id=<?php echo $booking_id; ?>" class="btn btn-primary" style="padding: 12px 30px;">
-                    <i class="fas fa-print"></i> View Receipt
-                </a>
-                <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" class="btn btn-secondary" style="padding: 12px 30px; margin-left: 10px;">
-                    <i class="fas fa-ticket-alt"></i> My Bookings
-                </a>
-            </div>
-        </div>
-    <?php endif; ?>
-
-    <?php if (empty($payment_method) && empty($success)): ?>
-        <div style="display: flex; flex-direction: column; gap: 30px;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
-                <!-- PayMongo Card -->
-                <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
-                     border-radius: 15px; padding: 30px; border: 2px solid rgba(226, 48, 32, 0.3); text-align: center;
-                     transition: all 0.3s ease; cursor: pointer; display: flex; flex-direction: column; height: 100%;"
-                     onclick="window.location.href='<?php echo SITE_URL; ?>index.php?page=customer/paymongo&booking_id=<?php echo $booking_id; ?>'"
-                     onmouseover="this.style.transform='translateY(-10px)'; this.style.borderColor='#e23020';"
-                     onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(226, 48, 32, 0.3)';">
-                    <div style="font-size: 4rem; color: #e23020; margin-bottom: 20px;">
-                        <i class="fas fa-bolt"></i>
+    <!-- Booking Summary -->
+    <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
+         border-radius: 15px; padding: 25px; margin-bottom: 30px; 
+         border: 1px solid rgba(226, 48, 32, 0.3);">
+        <h2 style="color: white; font-size: 1.5rem; margin-bottom: 20px; font-weight: 700;">
+            <i class="fas fa-receipt"></i> Booking Summary
+        </h2>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+            <div>
+                <div style="display: flex; gap: 15px; align-items: flex-start;">
+                    <?php if (!empty($booking['poster_url'])): ?>
+                    <img src="<?php echo $booking['poster_url']; ?>" 
+                         alt="<?php echo htmlspecialchars($booking['movie_title']); ?>"
+                         style="width: 60px; height: 80px; object-fit: cover; border-radius: 8px;">
+                    <?php else: ?>
+                    <div style="width: 60px; height: 80px; background: rgba(226,48,32,0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-film" style="color: rgba(255,255,255,0.3);"></i>
                     </div>
-                    <h2 style="color: white; font-size: 1.8rem; margin-bottom: 15px; font-weight: 700;">
-                        PayMongo
-                    </h2>
-                    <p style="color: var(--pale-red); margin-bottom: 20px; line-height: 1.6; flex: 1;">
-                        Get your booking confirmed instantly! Fast and secure payment available anytime.
-                    </p>
-                    <div style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                        <div style="display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 8px;">
-                            <i class="fas fa-check-circle" style="color: #2ecc71;"></i>
-                            <span>Available 24/7 - No waiting!</span>
+                    <?php endif; ?>
+                    <div>
+                        <div style="color: white; font-weight: 700; font-size: 1.1rem;"><?php echo htmlspecialchars($booking['movie_title']); ?></div>
+                        <div style="color: var(--pale-red); font-size: 0.85rem;">
+                            <?php echo $booking['rating']; ?> • <?php echo $booking['duration']; ?>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 8px;">
-                            <i class="fas fa-check-circle" style="color: #2ecc71;"></i>
-                            <span>Instant Confirmation</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px; color: white;">
-                            <i class="fas fa-check-circle" style="color: #2ecc71;"></i>
-                            <span>Credit/Debit Cards, GCash, PayMaya</span>
-                        </div>
-                    </div>
-                    <div style="font-size: 1.5rem; color: #2ecc71; font-weight: 700; margin-bottom: 20px;">
-                        ₱<?php echo number_format($booking['booking_fee'], 2); ?>
-                    </div>
-                    <div style="margin-top: auto;">
-                        <span style="background: #e23020; color: white; padding: 12px 30px; border-radius: 30px; font-weight: 600; display: inline-block; width: 100%; text-align: center; box-sizing: border-box;">
-                            Pay with PayMongo
-                        </span>
-                    </div>
-                </div>
-
-                <!-- Manual Payment Card -->
-                <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
-                     border-radius: 15px; padding: 30px; border: 2px solid rgba(226, 48, 32, 0.3); text-align: center;
-                     transition: all 0.3s ease; cursor: pointer; display: flex; flex-direction: column; height: 100%;"
-                     onclick="window.location.href='<?php echo SITE_URL; ?>index.php?page=customer/payment-manual&booking_id=<?php echo $booking_id; ?>'"
-                     onmouseover="this.style.transform='translateY(-10px)'; this.style.borderColor='#e23020';"
-                     onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(226, 48, 32, 0.3)';">
-                    <div style="font-size: 4rem; color: #e23020; margin-bottom: 20px;">
-                        <i class="fas fa-hand-holding-usd"></i>
-                    </div>
-                    <h2 style="color: white; font-size: 1.8rem; margin-bottom: 15px; font-weight: 700;">
-                        Manual Payment
-                    </h2>
-                    <p style="color: var(--pale-red); margin-bottom: 20px; line-height: 1.6; flex: 1;">
-                        Pay via GCash, PayMaya, or bank transfer. Upload your proof of payment for verification.
-                    </p>
-                    
-                    <div style="background: <?php echo $is_manual_payment_available ? 'rgba(46, 204, 113, 0.1)' : 'rgba(241, 196, 15, 0.1)'; ?>; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid <?php echo $is_manual_payment_available ? '#2ecc71' : '#f39c12'; ?>;">
-                        <div style="display: flex; align-items: center; gap: 10px; color: <?php echo $is_manual_payment_available ? '#2ecc71' : '#f39c12'; ?>; margin-bottom: 8px;">
-                            <i class="fas fa-clock fa-lg"></i>
-                            <span style="font-weight: 600;">Admin Hours: 8:00 AM - 5:00 PM</span>
-                        </div>
-                        <p style="color: var(--pale-red); margin-top: 8px; font-size: 0.9rem;">
-                            Current time: <strong><?php echo $current_time; ?></strong>
-                        </p>
-                        <?php if (!$is_manual_payment_available): ?>
-                        <p style="color: #f39c12; margin-top: 8px; font-size: 0.9rem; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 5px;">
-                            <i class="fas fa-lightbulb"></i> <strong>Quick tip:</strong> PayMongo gives you instant confirmation 24/7. Manual payments will be processed when admin is back online.
-                        </p>
-                        <?php endif; ?>
-                    </div>
-                    
-                    <div style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                        <div style="display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 8px;">
-                            <i class="fas fa-check-circle" style="color: #f39c12;"></i>
-                            <span>GCash, PayMaya, Bank Transfer</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 8px;">
-                            <i class="fas fa-check-circle" style="color: #f39c12;"></i>
-                            <span>Upload payment screenshot</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px; color: white;">
-                            <i class="fas fa-check-circle" style="color: #f39c12;"></i>
-                            <span>Verification within minutes to hours</span>
-                        </div>
-                    </div>
-                    
-                    <div style="font-size: 1.5rem; color: #2ecc71; font-weight: 700; margin-bottom: 20px;">
-                        ₱<?php echo number_format($booking['booking_fee'], 2); ?>
-                    </div>
-                    <div style="margin-top: auto;">
-                        <span style="background: #e23020; color: white; padding: 12px 30px; border-radius: 30px; font-weight: 600; display: inline-block; width: 100%; text-align: center; box-sizing: border-box;">
-                            Continue with Manual Payment
-                        </span>
                     </div>
                 </div>
             </div>
+            
+            <div>
+                <div style="color: var(--pale-red); font-size: 0.85rem; margin-bottom: 5px;">Show Date & Time</div>
+                <div style="color: white; font-weight: 600;"><?php echo date('h:i A', strtotime($booking['showtime'])); ?></div>
+                <div style="color: var(--pale-red); font-size: 0.85rem;"><?php echo date('D, M d, Y', strtotime($booking['show_date'])); ?></div>
+            </div>
+            
+            <div>
+                <div style="color: var(--pale-red); font-size: 0.85rem; margin-bottom: 5px;">Venue & Screen</div>
+                <div style="color: white; font-weight: 600;"><?php echo htmlspecialchars($booking['venue_name']); ?></div>
+                <div style="color: var(--pale-red); font-size: 0.85rem;"><?php echo htmlspecialchars($booking['screen_name']); ?></div>
+            </div>
+            
+            <div>
+                <div style="color: var(--pale-red); font-size: 0.85rem; margin-bottom: 5px;">Seats</div>
+                <div style="color: white; font-weight: 600;"><?php echo htmlspecialchars($booking['seat_list']); ?></div>
+                <div style="color: var(--pale-red); font-size: 0.85rem;"><?php echo $booking['total_seats']; ?> seat(s)</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(226,48,32,0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                <span style="color: white; font-weight: 700;">Total Amount:</span>
+                <span style="color: #2ecc71; font-size: 1.8rem; font-weight: 800;">₱<?php echo number_format($booking['total_amount'], 2); ?></span>
+            </div>
+            <div style="margin-top: 10px; background: rgba(241,196,15,0.1); padding: 12px; border-radius: 8px; border-left: 4px solid #f1c40f;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-hourglass-half" style="color: #f1c40f;"></i>
+                    <span style="color: white; font-size: 0.85rem;">
+                        Complete payment within <strong><?php echo max(0, 3 - $hours_since_booking); ?> hour(s)</strong> or booking will be automatically cancelled.
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
 
-            <div style="text-align: center;">
-                <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" class="btn btn-secondary" style="padding: 12px 30px;">
-                    <i class="fas fa-arrow-left"></i> Back to My Bookings
-                </a>
+    <!-- Time Status Message -->
+    <div style="background: <?php echo $is_admin_hours ? 'rgba(46, 204, 113, 0.1)' : 'rgba(241, 196, 15, 0.1)'; ?>; 
+         border-radius: 10px; padding: 15px 20px; margin-bottom: 25px; 
+         border-left: 4px solid <?php echo $is_admin_hours ? '#2ecc71' : '#f39c12'; ?>;">
+        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+            <i class="fas fa-clock" style="color: <?php echo $is_admin_hours ? '#2ecc71' : '#f39c12'; ?>; font-size: 1.5rem;"></i>
+            <div>
+                <p style="color: white; font-weight: 600; margin-bottom: 5px;">
+                    Current Time: <strong><?php echo $current_time_display; ?></strong> (Philippines Time)
+                </p>
+                <p style="color: var(--pale-red); font-size: 0.9rem;">
+                    <?php if ($is_admin_hours): ?>
+                        ✅ Admin hours are <strong>8:00 AM - 5:00 PM</strong>. You will be redirected to manual payment page.
+                    <?php else: ?>
+                        ⚠️ Admin hours are <strong>8:00 AM - 5:00 PM</strong>. Manual payment is currently unavailable.
+                        Please use <strong>PayMongo</strong> for instant payment, or wait until admin hours.
+                    <?php endif; ?>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Options Grid -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+        <!-- PayMongo Card (Always Available 24/7) -->
+        <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
+             border-radius: 15px; padding: 30px; border: 2px solid rgba(226, 48, 32, 0.3); text-align: center;
+             transition: all 0.3s ease; cursor: pointer; display: flex; flex-direction: column; height: 100%;"
+             onclick="window.location.href='<?php echo SITE_URL; ?>index.php?page=customer/paymongo&booking_id=<?php echo $booking_id; ?>'"
+             onmouseover="this.style.transform='translateY(-10px)'; this.style.borderColor='#e23020';"
+             onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(226, 48, 32, 0.3)';">
+            <div style="font-size: 4rem; color: #e23020; margin-bottom: 20px;">
+                <i class="fas fa-bolt"></i>
+            </div>
+            <h2 style="color: white; font-size: 1.8rem; margin-bottom: 15px; font-weight: 700;">
+                PayMongo
+            </h2>
+            <p style="color: var(--pale-red); margin-bottom: 20px; line-height: 1.6; flex: 1;">
+                Get your booking confirmed instantly! Fast and secure payment available 24/7.
+            </p>
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 8px;">
+                    <i class="fas fa-check-circle" style="color: #2ecc71;"></i>
+                    <span>Available 24/7 - No waiting!</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 8px;">
+                    <i class="fas fa-check-circle" style="color: #2ecc71;"></i>
+                    <span>Instant Confirmation</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; color: white;">
+                    <i class="fas fa-check-circle" style="color: #2ecc71;"></i>
+                    <span>Credit/Debit Cards, GCash, PayMaya</span>
+                </div>
+            </div>
+            <div style="font-size: 1.5rem; color: #2ecc71; font-weight: 700; margin-bottom: 20px;">
+                ₱<?php echo number_format($booking['total_amount'], 2); ?>
+            </div>
+            <div style="margin-top: auto;">
+                <span style="background: #e23020; color: white; padding: 12px 30px; border-radius: 30px; font-weight: 600; display: inline-block; width: 100%; text-align: center; box-sizing: border-box;">
+                    Pay with PayMongo
+                </span>
             </div>
         </div>
 
-    <?php elseif ($payment_method === 'paymongo'): ?>
-        <!-- This section is now handled by paymongo.php, so we redirect -->
-        <?php header("Location: " . SITE_URL . "index.php?page=customer/paymongo&booking_id=" . $booking_id); ?>
-        exit();
-    <?php endif; ?>
+        <!-- Manual Payment Card (Conditionally Available) -->
+        <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); 
+             border-radius: 15px; padding: 30px; border: 2px solid <?php echo $is_admin_hours ? 'rgba(226, 48, 32, 0.3)' : 'rgba(149, 165, 166, 0.3)'; ?>; 
+             text-align: center; transition: all 0.3s ease; display: flex; flex-direction: column; height: 100%;
+             <?php echo !$is_admin_hours ? 'opacity: 0.7; cursor: not-allowed;' : 'cursor: pointer;'; ?>"
+             <?php if ($is_admin_hours): ?>
+             onclick="window.location.href='<?php echo SITE_URL; ?>index.php?page=customer/payment-manual&booking_id=<?php echo $booking_id; ?>'"
+             onmouseover="this.style.transform='translateY(-10px)'; this.style.borderColor='#e23020';"
+             onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(226, 48, 32, 0.3)';"
+             <?php else: ?>
+             onmouseover="this.style.transform='none';"
+             onmouseout="this.style.transform='none';"
+             <?php endif; ?>>
+            <div style="font-size: 4rem; color: <?php echo $is_admin_hours ? '#e23020' : '#95a5a6'; ?>; margin-bottom: 20px;">
+                <i class="fas fa-hand-holding-usd"></i>
+            </div>
+            <h2 style="color: white; font-size: 1.8rem; margin-bottom: 15px; font-weight: 700;">
+                Manual Payment
+            </h2>
+            <p style="color: var(--pale-red); margin-bottom: 20px; line-height: 1.6; flex: 1;">
+                Pay via GCash, PayMaya, or bank transfer. Upload your proof of payment for verification.
+            </p>
+            
+            <div style="background: <?php echo $is_admin_hours ? 'rgba(46, 204, 113, 0.1)' : 'rgba(241, 196, 15, 0.1)'; ?>; 
+                 padding: 15px; border-radius: 8px; margin-bottom: 20px; 
+                 border-left: 4px solid <?php echo $is_admin_hours ? '#2ecc71' : '#f39c12'; ?>;">
+                <div style="display: flex; align-items: center; gap: 10px; color: <?php echo $is_admin_hours ? '#2ecc71' : '#f39c12'; ?>; margin-bottom: 8px;">
+                    <i class="fas fa-clock fa-lg"></i>
+                    <span style="font-weight: 600;">Admin Hours: 8:00 AM - 5:00 PM</span>
+                </div>
+                <p style="color: var(--pale-red); margin-top: 8px; font-size: 0.85rem;">
+                    Current time: <strong><?php echo $current_time_display; ?></strong>
+                </p>
+                <?php if (!$is_admin_hours): ?>
+                <p style="color: #f39c12; margin-top: 8px; font-size: 0.85rem; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 5px;">
+                    <i class="fas fa-lock"></i> <strong>Manual payment is currently unavailable.</strong><br>
+                    Please come back during admin hours (8:00 AM - 5:00 PM) or use PayMongo for instant payment.
+                </p>
+                <?php else: ?>
+                <p style="color: #2ecc71; margin-top: 8px; font-size: 0.85rem; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 5px;">
+                    <i class="fas fa-check-circle"></i> <strong>Manual payment is available now!</strong><br>
+                    Click to proceed with manual payment.
+                </p>
+                <?php endif; ?>
+            </div>
+            
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 8px;">
+                    <i class="fas fa-check-circle" style="color: #f39c12;"></i>
+                    <span>GCash, PayMaya, Bank Transfer</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 8px;">
+                    <i class="fas fa-check-circle" style="color: #f39c12;"></i>
+                    <span>Upload payment screenshot</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; color: white;">
+                    <i class="fas fa-check-circle" style="color: #f39c12;"></i>
+                    <span>Verification within minutes to hours</span>
+                </div>
+            </div>
+            
+            <div style="font-size: 1.5rem; color: #2ecc71; font-weight: 700; margin-bottom: 20px;">
+                ₱<?php echo number_format($booking['total_amount'], 2); ?>
+            </div>
+            <div style="margin-top: auto;">
+                <span style="background: <?php echo $is_admin_hours ? '#e23020' : '#95a5a6'; ?>; color: white; padding: 12px 30px; border-radius: 30px; font-weight: 600; display: inline-block; width: 100%; text-align: center; box-sizing: border-box;">
+                    <?php echo $is_admin_hours ? 'Continue with Manual Payment' : 'Unavailable - Outside Admin Hours'; ?>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Back Button -->
+    <div style="text-align: center; margin-top: 30px;">
+        <a href="<?php echo SITE_URL; ?>index.php?page=customer/my-bookings" class="btn btn-secondary" style="padding: 12px 30px;">
+            <i class="fas fa-arrow-left"></i> Back to My Bookings
+        </a>
+    </div>
 </div>
 
 <style>
@@ -276,18 +411,13 @@ require_once $root_dir . '/partials/header.php';
     --bg-card-light: #6b140e;
 }
 
-input:focus, select:focus, textarea:focus {
-    outline: none;
-    background: rgba(255, 255, 255, 0.12);
-    border-color: var(--primary-red);
-    box-shadow: 0 0 0 4px rgba(226, 48, 32, 0.2);
+@media (max-width: 992px) {
+    .payment-container > div:nth-child(5) {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 768px) {
-    .payment-container > div > div {
-        grid-template-columns: 1fr;
-    }
-    
     .payment-container {
         padding: 15px;
     }
@@ -297,6 +427,31 @@ input:focus, select:focus, textarea:focus {
     }
 }
 </style>
+
+<script>
+// Countdown timer for payment expiry
+const hoursSinceBooking = <?php echo $hours_since_booking; ?>;
+const expiryHours = 3;
+const remainingHours = Math.max(0, expiryHours - hoursSinceBooking);
+const remainingMinutes = Math.floor((remainingHours - Math.floor(remainingHours)) * 60);
+
+if (remainingHours > 0) {
+    console.log(`Payment must be completed within ${Math.floor(remainingHours)} hours ${remainingMinutes} minutes`);
+}
+
+// Update countdown timer every minute
+function updateCountdown() {
+    const remainingElem = document.querySelector('.fa-hourglass-half')?.parentElement;
+    if (remainingElem) {
+        // Force refresh page when time is about to expire (5 minutes left)
+        if (remainingHours <= 0.08) { // ~5 minutes
+            location.reload();
+        }
+    }
+}
+
+setInterval(updateCountdown, 60000);
+</script>
 
 <?php
 require_once $root_dir . '/partials/footer.php';

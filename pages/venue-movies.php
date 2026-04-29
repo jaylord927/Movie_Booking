@@ -6,9 +6,7 @@ require_once $root_dir . '/partials/header.php';
 
 $conn = get_db_connection();
 
-// ============================================
-// UPDATED: Get venue by name from URL, then find by ID
-// ============================================
+// Get venue by name from URL
 $venue_name = isset($_GET['venue']) ? urldecode($_GET['venue']) : '';
 
 if (empty($venue_name)) {
@@ -16,11 +14,11 @@ if (empty($venue_name)) {
     exit();
 }
 
-// First, get the venue ID from the venues table
+// First, get the venue from the venues table
 $venue_stmt = $conn->prepare("
-    SELECT id, venue_name, venue_location, google_maps_link, venue_photo_path 
+    SELECT id, venue_name, venue_location, google_maps_link, venue_photo_path, contact_number, operating_hours, is_active
     FROM venues 
-    WHERE venue_name = ?
+    WHERE venue_name = ? AND is_active = 1
 ");
 $venue_stmt->bind_param("s", $venue_name);
 $venue_stmt->execute();
@@ -28,20 +26,17 @@ $venue_result = $venue_stmt->get_result();
 $venue = $venue_result->fetch_assoc();
 $venue_stmt->close();
 
+// If venue not found, redirect to venues page
 if (!$venue) {
-    // If venue not found by name, try to redirect to venues page
     header("Location: " . SITE_URL . "index.php?page=venue");
     exit();
 }
 
-// ============================================
 // Generate embed URL from Google Maps link for visual map display
-// ============================================
 $embed_url = '';
 $has_valid_map = false;
 
 if (!empty($venue['google_maps_link'])) {
-    // Try to extract coordinates from Google Maps link
     if (preg_match('/q=([0-9.-]+),([0-9.-]+)/', $venue['google_maps_link'], $matches)) {
         $lat = $matches[1];
         $lng = $matches[2];
@@ -58,13 +53,28 @@ if (!empty($venue['google_maps_link'])) {
     }
 }
 
-// ============================================
-// UPDATED: Get movies by venue_id instead of venue_name string
-// ============================================
+// Get all movies for this venue through screens
 $movies_stmt = $conn->prepare("
-    SELECT m.* 
+    SELECT DISTINCT 
+        m.id,
+        m.title,
+        m.director,
+        m.genre,
+        m.duration,
+        m.rating,
+        m.description,
+        m.poster_url,
+        m.trailer_url,
+        m.is_active,
+        m.created_at,
+        GROUP_CONCAT(DISTINCT sc.screen_name ORDER BY sc.screen_number SEPARATOR ', ') as screens
     FROM movies m
-    WHERE m.venue_id = ? AND m.is_active = 1
+    JOIN schedules s ON m.id = s.movie_id
+    JOIN screens sc ON s.screen_id = sc.id
+    WHERE sc.venue_id = ? 
+    AND m.is_active = 1 
+    AND s.is_active = 1
+    GROUP BY m.id, m.title, m.director, m.genre, m.duration, m.rating, m.description, m.poster_url, m.trailer_url, m.is_active, m.created_at
     ORDER BY m.created_at DESC
 ");
 $movies_stmt->bind_param("i", $venue['id']);
@@ -77,30 +87,43 @@ while ($row = $movies_result->fetch_assoc()) {
 }
 $movies_stmt->close();
 
-// ============================================
-// Fetch schedules for movies
-// ============================================
+// Fetch schedules for each movie
 $schedules = [];
 foreach ($movies as $movie) {
     $schedule_stmt = $conn->prepare("
-        SELECT * FROM movie_schedules 
-        WHERE movie_id = ? AND is_active = 1 AND show_date >= CURDATE() 
-        ORDER BY show_date, showtime
+        SELECT 
+            s.id as schedule_id,
+            s.show_date,
+            s.showtime,
+            s.base_price,
+            sc.screen_name,
+            sc.screen_number,
+            COUNT(sa.id) as total_seats,
+            COUNT(CASE WHEN sa.status = 'available' THEN 1 END) as available_seats
+        FROM schedules s
+        JOIN screens sc ON s.screen_id = sc.id
+        LEFT JOIN seat_availability sa ON s.id = sa.schedule_id
+        WHERE s.movie_id = ? 
+        AND sc.venue_id = ?
+        AND s.is_active = 1 
+        AND s.show_date >= CURDATE()
+        GROUP BY s.id, s.show_date, s.showtime, s.base_price, sc.screen_name, sc.screen_number
+        HAVING available_seats > 0
+        ORDER BY s.show_date, s.showtime
+        LIMIT 10
     ");
-    $schedule_stmt->bind_param("i", $movie['id']);
+    $schedule_stmt->bind_param("ii", $movie['id'], $venue['id']);
     $schedule_stmt->execute();
-    $schedule_result = $schedule_stmt->get_result();
+    $schedules_result = $schedule_stmt->get_result();
     $movie_schedules = [];
-    while ($row = $schedule_result->fetch_assoc()) {
+    while ($row = $schedules_result->fetch_assoc()) {
         $movie_schedules[] = $row;
     }
     $schedules[$movie['id']] = $movie_schedules;
     $schedule_stmt->close();
 }
 
-// ============================================
 // Check which movies have schedules (Now Showing)
-// ============================================
 $now_showing_ids = [];
 foreach ($movies as $movie) {
     if (!empty($schedules[$movie['id']])) {
@@ -133,8 +156,13 @@ $conn->close();
                     <i class="fas fa-map-pin"></i> <?php echo htmlspecialchars($venue['venue_location']); ?>
                 </p>
                 <?php endif; ?>
+                <?php if (!empty($venue['operating_hours'])): ?>
+                <p style="color: rgba(255,255,255,0.6); font-size: 0.85rem;">
+                    <i class="fas fa-clock"></i> <?php echo htmlspecialchars($venue['operating_hours']); ?>
+                </p>
+                <?php endif; ?>
                 <?php if (!empty($movies)): ?>
-                <p style="color: #2ecc71; font-size: 0.9rem; margin-top: 5px;">
+                <p style="color: #2ecc71; font-size: 0.9rem; margin-top: 8px;">
                     <i class="fas fa-film"></i> <?php echo count($movies); ?> movie<?php echo count($movies) != 1 ? 's' : ''; ?> currently available
                 </p>
                 <?php endif; ?>
@@ -152,11 +180,11 @@ $conn->close();
             </div>
         </div>
         
-        <!-- Two Column Layout: Venue Photo + Google Map (like venue.php) -->
+        <!-- Two Column Layout: Venue Photo + Google Map -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px;">
             <!-- Venue Photo Column -->
             <div>
-                <?php if (!empty($venue['venue_photo_path'])): ?>
+                <?php if (!empty($venue['venue_photo_path']) && file_exists($root_dir . '/' . $venue['venue_photo_path'])): ?>
                 <div style="background: rgba(0,0,0,0.3); border-radius: 12px; padding: 20px; height: 100%;">
                     <div style="color: white; font-weight: 600; margin-bottom: 12px; font-size: 0.9rem;">
                         <i class="fas fa-camera"></i> Venue Photo
@@ -267,6 +295,11 @@ $conn->close();
                         <?php if ($movie['genre']): ?>
                         <div style="display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.8); font-size: 0.9rem;"><i class="fas fa-film"></i> <?php echo htmlspecialchars($movie['genre']); ?></div>
                         <?php endif; ?>
+                        <?php if (!empty($movie['screens'])): ?>
+                        <div style="display: flex; align-items: center; gap: 5px; color: #3498db; font-size: 0.75rem; margin-top: 5px;">
+                            <i class="fas fa-tv"></i> <?php echo htmlspecialchars($movie['screens']); ?>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     
                     <?php if ($movie['description']): ?>
@@ -287,7 +320,7 @@ $conn->close();
                                 $show_time = date('h:i A', strtotime($schedule['showtime']));
                                 $is_today = date('Y-m-d') == $schedule['show_date'] ? ' (Today)' : '';
                             ?>
-                            <option value="<?php echo $schedule['id']; ?>" style="background: var(--bg-card); color: white;">
+                            <option value="<?php echo $schedule['schedule_id']; ?>" style="background: var(--bg-card); color: white;">
                                 <?php echo $show_date . $is_today . ' • ' . $show_time . ' • ' . $schedule['available_seats'] . ' seats'; ?>
                             </option>
                             <?php endforeach; ?>

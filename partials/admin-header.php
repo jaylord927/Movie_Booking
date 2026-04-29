@@ -61,6 +61,8 @@ if (!defined('SITE_URL')) {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
         }
         
         .admin-logo {
@@ -95,15 +97,16 @@ if (!defined('SITE_URL')) {
         
         .admin-nav {
             display: flex;
-            gap: 20px;
+            gap: 8px;
             align-items: center;
+            flex-wrap: wrap;
         }
         
         .admin-nav-link {
             color: white;
             text-decoration: none;
             font-weight: 600;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             padding: 8px 16px;
             border-radius: 8px;
             transition: all 0.3s ease;
@@ -210,16 +213,19 @@ if (!defined('SITE_URL')) {
         @media (max-width: 992px) {
             .admin-header-container {
                 flex-direction: column;
-                gap: 15px;
+                text-align: center;
             }
             
             .admin-nav {
-                flex-wrap: wrap;
+                justify-content: center;
+            }
+            
+            .admin-user-info {
                 justify-content: center;
             }
         }
         
-        @media (max-width: 576px) {
+        @media (max-width: 768px) {
             .admin-nav-link {
                 padding: 6px 12px;
                 font-size: 0.85rem;
@@ -240,7 +246,7 @@ if (!defined('SITE_URL')) {
     <header class="admin-header">
         <div class="admin-header-container">
             <a href="<?php echo SITE_URL; ?>index.php?page=admin/dashboard" class="admin-logo">
-                <div class="admin-logo-icon">⚙️</div>
+                <div class="admin-logo-icon">🎬</div>
                 <div class="admin-logo-text">
                     <div class="admin-logo-title">ADMIN PANEL</div>
                     <div class="admin-logo-subtitle">Movie Ticket Booking</div>
@@ -255,7 +261,7 @@ if (!defined('SITE_URL')) {
                 $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
                 $pending_count = 0;
                 if (!$conn->connect_error) {
-                    $result = $conn->query("SELECT COUNT(*) as count FROM manual_payments WHERE status = 'Pending'");
+                    $result = $conn->query("SELECT COUNT(*) as count FROM manual_payments WHERE status = 'pending'");
                     if ($result) {
                         $pending_count = $result->fetch_assoc()['count'];
                     }
@@ -263,26 +269,37 @@ if (!defined('SITE_URL')) {
                 }
                 ?>
                 
-                <a href="<?php echo SITE_URL; ?>index.php?page=admin/dashboard" 
-                   class="admin-nav-link <?php echo $admin_section == 'dashboard' ? 'active' : ''; ?>">
-                    <i class="fas fa-tachometer-alt"></i> Dashboard
+                <!-- Step 1: Add Venue -->
+                <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" 
+                   class="admin-nav-link <?php echo $admin_section == 'manage-venues' ? 'active' : ''; ?>">
+                    <i class="fas fa-building"></i> Add Venue
                 </a>
                 
+                <!-- Step 2: Add Movie -->
                 <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-movies" 
                    class="admin-nav-link <?php echo $admin_section == 'manage-movies' ? 'active' : ''; ?>">
-                    <i class="fas fa-film"></i> Movies
+                    <i class="fas fa-film"></i> Add Movie
                 </a>
                 
+                <!-- Step 3: Add Seats (Customizable) -->
+                <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-seats" 
+                   class="admin-nav-link <?php echo $admin_section == 'manage-seats' ? 'active' : ''; ?>">
+                    <i class="fas fa-chair"></i> Add Seats
+                </a>
+                
+                <!-- Step 4: Add Schedules -->
                 <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-schedules" 
                    class="admin-nav-link <?php echo $admin_section == 'manage-schedules' ? 'active' : ''; ?>">
-                    <i class="fas fa-calendar-alt"></i> Schedules
+                    <i class="fas fa-calendar-alt"></i> Add Schedules
                 </a>
                 
-                <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-users" 
+                <!-- Manage Users -->
+                <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-users&type=customer" 
                    class="admin-nav-link <?php echo $admin_section == 'manage-users' ? 'active' : ''; ?>">
-                    <i class="fas fa-users"></i> Users
+                    <i class="fas fa-users"></i> Manage Users
                 </a>
 
+                <!-- Manage Payments -->
                 <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-payments" 
                    class="admin-nav-link <?php echo $admin_section == 'manage-payments' ? 'active' : ''; ?>">
                     <i class="fas fa-credit-card"></i> Payments
@@ -291,6 +308,7 @@ if (!defined('SITE_URL')) {
                     <?php endif; ?>
                 </a>
                 
+                <!-- View Site -->
                 <a href="<?php echo SITE_URL; ?>" 
                    class="admin-nav-link">
                     <i class="fas fa-home"></i> View Site
@@ -312,4 +330,4 @@ if (!defined('SITE_URL')) {
         </div>
     </header>
     
-    <div class="admin-main-container" style="max-width: 1400px; margin: 0 auto; padding: 20px;"></div>
+    <div class="admin-main-container" style="max-width: 1400px; margin: 0 auto; padding: 20px;">

@@ -9,21 +9,14 @@ $conn = get_db_connection();
 // Get filter from URL
 $filter = isset($_GET['filter']) ? $_GET['filter'] : 'all';
 
-// ============================================
-// UPDATED QUERY: Fetch all active movies with venue information
-// ============================================
+// Get all active movies (without venue_id - that doesn't exist)
 $movies_result = $conn->query("
-    SELECT m.*, 
-           v.id as venue_id,
-           v.venue_name, 
-           v.venue_location, 
-           v.google_maps_link,
-           v.venue_photo_path
-    FROM movies m
-    LEFT JOIN venues v ON m.venue_id = v.id
+    SELECT m.* 
+    FROM movies m 
     WHERE m.is_active = 1 
     ORDER BY m.created_at DESC
 ");
+
 $all_movies = [];
 if ($movies_result) {
     while ($row = $movies_result->fetch_assoc()) {
@@ -36,7 +29,14 @@ $now_showing = [];
 $coming_soon = [];
 
 foreach ($all_movies as $movie) {
-    $schedule_check = $conn->prepare("SELECT id FROM movie_schedules WHERE movie_id = ? AND is_active = 1 AND show_date >= CURDATE() LIMIT 1");
+    $schedule_check = $conn->prepare("
+        SELECT s.id 
+        FROM schedules s
+        WHERE s.movie_id = ? 
+        AND s.is_active = 1 
+        AND s.show_date >= CURDATE()
+        LIMIT 1
+    ");
     $schedule_check->bind_param("i", $movie['id']);
     $schedule_check->execute();
     $schedule_result = $schedule_check->get_result();
@@ -121,22 +121,43 @@ if (!empty($selectedRating) && $selectedRating !== 'all') {
 
 $filteredMovies = array_values($filteredMovies);
 
-// Fetch schedules for movies
+// Get movie IDs for filtered movies
+$filtered_movie_ids = array_column($filteredMovies, 'id');
+
+// Fetch schedules for now showing movies
 $schedules = [];
-foreach ($filteredMovies as $movie) {
-    $schedule_stmt = $conn->prepare("
-        SELECT * FROM movie_schedules 
-        WHERE movie_id = ? AND is_active = 1 AND show_date >= CURDATE() 
-        ORDER BY show_date, showtime
-    ");
-    $schedule_stmt->bind_param("i", $movie['id']);
+if (!empty($filtered_movie_ids) && ($filter === 'now-showing' || $filter === 'all')) {
+    $placeholders = implode(',', array_fill(0, count($filtered_movie_ids), '?'));
+    $schedule_sql = "
+        SELECT 
+            s.*, 
+            sc.screen_name, 
+            sc.screen_number,
+            v.venue_name,
+            v.venue_location,
+            v.google_maps_link,
+            v.venue_photo_path
+        FROM schedules s
+        JOIN screens sc ON s.screen_id = sc.id
+        JOIN venues v ON sc.venue_id = v.id
+        WHERE s.movie_id IN ($placeholders) 
+        AND s.is_active = 1 
+        AND s.show_date >= CURDATE()
+        ORDER BY s.show_date, s.showtime
+    ";
+    
+    $schedule_stmt = $conn->prepare($schedule_sql);
+    $types = str_repeat('i', count($filtered_movie_ids));
+    $schedule_stmt->bind_param($types, ...$filtered_movie_ids);
     $schedule_stmt->execute();
-    $schedule_result = $schedule_stmt->get_result();
-    $movie_schedules = [];
-    while ($row = $schedule_result->fetch_assoc()) {
-        $movie_schedules[] = $row;
+    $schedules_result = $schedule_stmt->get_result();
+    
+    while ($row = $schedules_result->fetch_assoc()) {
+        if (!isset($schedules[$row['movie_id']])) {
+            $schedules[$row['movie_id']] = [];
+        }
+        $schedules[$row['movie_id']][] = $row;
     }
-    $schedules[$movie['id']] = $movie_schedules;
     $schedule_stmt->close();
 }
 
@@ -280,32 +301,6 @@ $conn->close();
                 <div style="padding: 25px; flex: 1; display: flex; flex-direction: column;">
                     <h3 style="color: white; font-size: 1.3rem; font-weight: 800; margin-bottom: 10px; line-height: 1.4;"><?php echo htmlspecialchars($movie['title']); ?></h3>
                     
-                    <!-- ============================================
-                         VENUE INFORMATION DISPLAY (UPDATED)
-                         Now shows venue name from venues table
-                    ============================================= -->
-                    <?php if (!empty($movie['venue_name'])): ?>
-                    <div style="background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid var(--primary-red);">
-                        <div style="display: flex; align-items: center; gap: 8px; color: var(--light-red); font-size: 0.85rem; margin-bottom: 3px;">
-                            <i class="fas fa-building"></i> <strong><?php echo htmlspecialchars($movie['venue_name']); ?></strong>
-                        </div>
-                        <?php if (!empty($movie['venue_location'])): ?>
-                        <div style="display: flex; align-items: center; gap: 5px; color: var(--pale-red); font-size: 0.75rem;">
-                            <i class="fas fa-map-pin"></i> <?php echo htmlspecialchars(substr($movie['venue_location'], 0, 50)); ?>
-                            <?php if (strlen($movie['venue_location']) > 50): ?>...<?php endif; ?>
-                        </div>
-                        <?php endif; ?>
-                        <?php if (!empty($movie['google_maps_link'])): ?>
-                        <div style="margin-top: 5px;">
-                            <a href="<?php echo htmlspecialchars($movie['google_maps_link']); ?>" target="_blank" 
-                               style="color: #3498db; font-size: 0.7rem; text-decoration: none;">
-                                <i class="fas fa-map-marked-alt"></i> View on Map
-                            </a>
-                        </div>
-                        <?php endif; ?>
-                    </div>
-                    <?php endif; ?>
-                    
                     <div style="margin-bottom: 15px;">
                         <?php if ($movie['duration']): ?>
                         <div style="display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.8); font-size: 0.9rem; margin-bottom: 5px;"><i class="fas fa-clock"></i> <?php echo $movie['duration']; ?></div>
@@ -323,8 +318,8 @@ $conn->close();
                     </div>
                     <?php endif; ?>
                     
-                    <!-- Schedule Dropdown -->
-                    <?php if (($filter === 'now-showing' || $filter === 'all') && !empty($schedules[$movie['id']])): ?>
+                    <!-- Schedule Dropdown for Now Showing -->
+                    <?php if (($filter === 'now-showing' || $filter === 'all') && isset($schedules[$movie['id']]) && !empty($schedules[$movie['id']])): ?>
                     <div style="margin-bottom: 15px; width: 100%;">
                         <select class="schedule-select" data-movie-id="<?php echo $movie['id']; ?>" style="width: 100%; padding: 12px 14px; background: rgba(255, 255, 255, 0.15); border: 2px solid rgba(226, 48, 32, 0.4); border-radius: 8px; color: white; font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: all 0.3s ease; appearance: none; background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" fill=\"white\" viewBox=\"0 0 20 20\"><path d=\"M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z\"/></svg>'); background-repeat: no-repeat; background-position: right 14px center; background-size: 14px;">
                             <option value="" style="background: var(--bg-card); color: white;">Select a showtime</option>
@@ -332,9 +327,11 @@ $conn->close();
                                 $show_date = date('D, M d', strtotime($schedule['show_date']));
                                 $show_time = date('h:i A', strtotime($schedule['showtime']));
                                 $is_today = date('Y-m-d') == $schedule['show_date'] ? ' (Today)' : '';
+                                // Get venue info
+                                $venue_display = !empty($schedule['venue_name']) ? ' • ' . htmlspecialchars($schedule['venue_name']) : '';
                             ?>
                             <option value="<?php echo $schedule['id']; ?>" style="background: var(--bg-card); color: white;">
-                                <?php echo $show_date . $is_today . ' • ' . $show_time . ' • ' . $schedule['available_seats'] . ' seats'; ?>
+                                <?php echo $show_date . $is_today . ' • ' . $show_time . $venue_display; ?>
                             </option>
                             <?php endforeach; ?>
                         </select>
@@ -351,7 +348,7 @@ $conn->close();
                         <a href="<?php echo SITE_URL; ?>index.php?page=customer/movie-details&id=<?php echo $movie['id']; ?>" style="flex: 1; background: rgba(255,255,255,0.1); color: white; border: 2px solid rgba(226, 48, 32, 0.3); padding: 8px; border-radius: 8px; font-weight: 600; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; gap: 5px; text-decoration: none; font-size: 0.9rem; height: 45px;">
                             <i class="fas fa-info-circle"></i> Details
                         </a>
-                        <?php if ($filter === 'now-showing' || ($filter === 'all' && !empty($schedules[$movie['id']]))): ?>
+                        <?php if (($filter === 'now-showing' || ($filter === 'all' && in_array($movie['id'], array_column($now_showing, 'id')))) && isset($schedules[$movie['id']]) && !empty($schedules[$movie['id']])): ?>
                             <?php if (isset($_SESSION['user_id']) && $_SESSION['user_role'] === 'Customer'): ?>
                                 <a href="<?php echo SITE_URL; ?>index.php?page=customer/booking&movie=<?php echo $movie['id']; ?>" class="book-now-btn" data-movie-id="<?php echo $movie['id']; ?>" style="flex: 1; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); color: white; border: none; padding: 8px; border-radius: 8px; font-weight: 600; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; gap: 5px; text-decoration: none; font-size: 0.9rem; height: 45px;">
                                     <i class="fas fa-ticket-alt"></i> Book
@@ -514,37 +511,41 @@ document.addEventListener('DOMContentLoaded', function() {
     const ratingSelect = document.getElementById('ratingSelect');
     const filter = '<?php echo $filter; ?>';
     
-    genreSelect.addEventListener('change', function() {
-        const genre = this.value;
-        const rating = ratingSelect.value;
-        let url = '?page=movies&filter=' + filter;
-        
-        if (genre && genre !== 'all') {
-            url += '&genre=' + encodeURIComponent(genre);
-        }
-        
-        if (rating && rating !== 'all') {
-            url += '&rating=' + encodeURIComponent(rating);
-        }
-        
-        window.location.href = url;
-    });
+    if (genreSelect) {
+        genreSelect.addEventListener('change', function() {
+            const genre = this.value;
+            const rating = ratingSelect ? ratingSelect.value : '';
+            let url = '?page=movies&filter=' + filter;
+            
+            if (genre && genre !== 'all') {
+                url += '&genre=' + encodeURIComponent(genre);
+            }
+            
+            if (rating && rating !== 'all') {
+                url += '&rating=' + encodeURIComponent(rating);
+            }
+            
+            window.location.href = url;
+        });
+    }
     
-    ratingSelect.addEventListener('change', function() {
-        const rating = this.value;
-        const genre = genreSelect.value;
-        let url = '?page=movies&filter=' + filter;
-        
-        if (genre && genre !== 'all') {
-            url += '&genre=' + encodeURIComponent(genre);
-        }
-        
-        if (rating && rating !== 'all') {
-            url += '&rating=' + encodeURIComponent(rating);
-        }
-        
-        window.location.href = url;
-    });
+    if (ratingSelect) {
+        ratingSelect.addEventListener('change', function() {
+            const rating = this.value;
+            const genre = genreSelect ? genreSelect.value : '';
+            let url = '?page=movies&filter=' + filter;
+            
+            if (genre && genre !== 'all') {
+                url += '&genre=' + encodeURIComponent(genre);
+            }
+            
+            if (rating && rating !== 'all') {
+                url += '&rating=' + encodeURIComponent(rating);
+            }
+            
+            window.location.href = url;
+        });
+    }
     
     // Handle schedule selection
     const scheduleSelects = document.querySelectorAll('.schedule-select');

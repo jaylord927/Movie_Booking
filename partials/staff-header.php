@@ -111,8 +111,8 @@ if (!defined('SITE_URL')) {
             color: white;
             text-decoration: none;
             font-weight: 600;
-            font-size: 0.95rem;
-            padding: 8px 18px;
+            font-size: 0.9rem;
+            padding: 8px 16px;
             border-radius: 25px;
             transition: all 0.3s ease;
             display: flex;
@@ -197,9 +197,36 @@ if (!defined('SITE_URL')) {
             min-height: calc(100vh - 80px);
         }
         
+        /* Payment badge for notifications */
+        .nav-badge {
+            background: #e74c3c;
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 20px;
+            margin-left: 5px;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.1);
+                opacity: 0.8;
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+        
         @media (max-width: 1024px) {
             .staff-nav-link {
-                padding: 6px 14px;
+                padding: 6px 12px;
                 font-size: 0.85rem;
             }
             
@@ -248,33 +275,72 @@ if (!defined('SITE_URL')) {
                 <?php
                 $current_page = isset($_GET['page']) ? $_GET['page'] : 'staff/dashboard';
                 $staff_section = explode('/', $current_page)[1] ?? 'dashboard';
+                
+                // Get pending verification count for badge
+                $conn = null;
+                $pending_verification_count = 0;
+                try {
+                    $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+                    if (!$conn->connect_error) {
+                        $result = $conn->query("
+                            SELECT COUNT(*) as count 
+                            FROM bookings 
+                            WHERE payment_status = 'pending_verification' 
+                            AND status = 'ongoing'
+                        ");
+                        if ($result && $result->num_rows > 0) {
+                            $pending_verification_count = $result->fetch_assoc()['count'];
+                        }
+                        $conn->close();
+                    }
+                } catch (Exception $e) {
+                    // Silent fail - badge just won't show
+                }
                 ?>
                 
+                <!-- Dashboard -->
                 <a href="<?php echo SITE_URL; ?>index.php?page=staff/dashboard" 
                    class="staff-nav-link <?php echo $staff_section == 'dashboard' ? 'active' : ''; ?>">
                     <i class="fas fa-tachometer-alt"></i> Dashboard
                 </a>
+                
+                <!-- Scan QR -->
                 <a href="<?php echo SITE_URL; ?>index.php?page=staff/scan-qr" 
                    class="staff-nav-link <?php echo $staff_section == 'scan-qr' ? 'active' : ''; ?>">
                     <i class="fas fa-qrcode"></i> Scan QR
                 </a>
+                
+                <!-- Verify Bookings -->
                 <a href="<?php echo SITE_URL; ?>index.php?page=staff/verify-booking" 
                    class="staff-nav-link <?php echo $staff_section == 'verify-booking' ? 'active' : ''; ?>">
                     <i class="fas fa-search"></i> Verify
+                    <?php if ($pending_verification_count > 0): ?>
+                        <span class="nav-badge"><?php echo $pending_verification_count; ?></span>
+                    <?php endif; ?>
                 </a>
+                
+                <!-- Verify History -->
                 <a href="<?php echo SITE_URL; ?>index.php?page=staff/verify-history" 
                    class="staff-nav-link <?php echo $staff_section == 'verify-history' ? 'active' : ''; ?>">
                     <i class="fas fa-history"></i> History
                 </a>
+                
+                <!-- Print Tickets -->
                 <a href="<?php echo SITE_URL; ?>index.php?page=staff/print-ticket" 
                    class="staff-nav-link <?php echo $staff_section == 'print-ticket' ? 'active' : ''; ?>">
                     <i class="fas fa-print"></i> Print Tickets
+                </a>
+                
+                <!-- Payment Transactions (NEW) -->
+                <a href="<?php echo SITE_URL; ?>index.php?page=staff/payment-transaction" 
+                   class="staff-nav-link <?php echo $staff_section == 'payment-transaction' ? 'active' : ''; ?>">
+                    <i class="fas fa-credit-card"></i> Payments
                 </a>
             </nav>
             
             <div class="staff-user-info">
                 <span class="staff-user-name">
-                    <i class="fas fa-user-circle"></i> <?php echo $_SESSION['user_name']; ?>
+                    <i class="fas fa-user-circle"></i> <?php echo htmlspecialchars($_SESSION['user_name']); ?>
                 </span>
                 <span class="staff-role-badge">
                     <i class="fas fa-id-card"></i> Staff

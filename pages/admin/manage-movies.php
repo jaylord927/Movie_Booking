@@ -1,33 +1,25 @@
 <?php
 $root_dir = dirname(dirname(__DIR__));
 require_once $root_dir . '/includes/config.php';
+require_once $root_dir . '/includes/functions.php';
 
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'Admin') {
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role']) || ($_SESSION['user_role'] !== 'Admin' && $_SESSION['user_role'] !== 'Owner')) {
     header("Location: " . SITE_URL . "index.php?page=login");
     exit();
 }
 
 require_once $root_dir . '/partials/admin-header.php';
 
-$conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+$conn = get_db_connection();
 
 $error = '';
 $success = '';
 $edit_mode = false;
 $edit_movie = null;
-
-// Create uploads/venue directory if it doesn't exist (for backward compatibility)
-$venue_upload_dir = $root_dir . "/uploads/venue/";
-if (!file_exists($venue_upload_dir)) {
-    mkdir($venue_upload_dir, 0777, true);
-}
 
 // ============================================
 // ADD MOVIE
@@ -41,46 +33,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_movie'])) {
     $description = trim($_POST['description']);
     $poster_url = htmlspecialchars(trim($_POST['poster_url'] ?? ''), ENT_QUOTES, 'UTF-8');
     $trailer_url = htmlspecialchars(trim($_POST['trailer_url'] ?? ''), ENT_QUOTES, 'UTF-8');
-    $venue_id = !empty($_POST['venue_id']) ? intval($_POST['venue_id']) : null;
-    $standard_price = floatval($_POST['standard_price'] ?? 350);
-    $premium_price = floatval($_POST['premium_price'] ?? 450);
-    $sweet_spot_price = floatval($_POST['sweet_spot_price'] ?? 550);
+    $selected_screens = isset($_POST['screen_ids']) ? $_POST['screen_ids'] : [];
     
     if (empty($title) || empty($genre) || empty($duration) || empty($rating) || empty($description)) {
         $error = "All required fields must be filled!";
-    } elseif ($venue_id === null || $venue_id <= 0) {
-        $error = "Please select a venue!";
+    } elseif (empty($selected_screens)) {
+        $error = "Please select at least one screen!";
     } else {
-        // Verify venue exists
-        $venue_check = $conn->prepare("SELECT id FROM venues WHERE id = ?");
-        $venue_check->bind_param("i", $venue_id);
-        $venue_check->execute();
-        $venue_result = $venue_check->get_result();
+        $conn->begin_transaction();
         
-        if ($venue_result->num_rows === 0) {
-            $error = "Selected venue does not exist!";
-        } else {
-            $stmt = $conn->prepare("INSERT INTO movies (title, director, genre, duration, rating, description, poster_url, trailer_url, venue_id, standard_price, premium_price, sweet_spot_price, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sssssssssdddi", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_id, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id']);
+        try {
+            // Insert movie
+            $stmt = $conn->prepare("INSERT INTO movies (title, director, genre, duration, rating, description, poster_url, trailer_url, is_active, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)");
+            $stmt->bind_param("ssssssssi", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $_SESSION['user_id']);
             
-            if ($stmt->execute()) {
-                $new_movie_id = $stmt->insert_id;
-                $success = "Movie added successfully! ID: " . $new_movie_id;
-                $_POST = array();
-            } else {
-                $error = "Failed to add movie: " . $conn->error;
+            if (!$stmt->execute()) {
+                throw new Exception("Failed to add movie: " . $stmt->error);
             }
             
+            $new_movie_id = $stmt->insert_id;
             $stmt->close();
+            
+            // Insert movie-screen prices
+            $price_stmt = $conn->prepare("INSERT INTO movie_screen_prices (movie_id, screen_id, seat_type_id, price, is_active) VALUES (?, ?, ?, ?, 1)");
+            
+            foreach ($selected_screens as $screen_id) {
+                $standard_price = floatval($_POST['standard_price_' . $screen_id] ?? 350);
+                $premium_price = floatval($_POST['premium_price_' . $screen_id] ?? 450);
+                $sweet_spot_price = floatval($_POST['sweet_spot_price_' . $screen_id] ?? 550);
+                
+                // Get seat type IDs
+                $seat_types = $conn->query("SELECT id, name FROM seat_types WHERE is_active = 1");
+                $seat_type_ids = [];
+                while ($st = $seat_types->fetch_assoc()) {
+                    $seat_type_ids[$st['name']] = $st['id'];
+                }
+                
+                // Standard seat price
+                if (isset($seat_type_ids['Standard'])) {
+                    $price_stmt->bind_param("iiid", $new_movie_id, $screen_id, $seat_type_ids['Standard'], $standard_price);
+                    $price_stmt->execute();
+                }
+                
+                // Premium seat price
+                if (isset($seat_type_ids['Premium'])) {
+                    $price_stmt->bind_param("iiid", $new_movie_id, $screen_id, $seat_type_ids['Premium'], $premium_price);
+                    $price_stmt->execute();
+                }
+                
+                // Sweet Spot seat price
+                if (isset($seat_type_ids['Sweet Spot'])) {
+                    $price_stmt->bind_param("iiid", $new_movie_id, $screen_id, $seat_type_ids['Sweet Spot'], $sweet_spot_price);
+                    $price_stmt->execute();
+                }
+            }
+            $price_stmt->close();
+            
+            $conn->commit();
+            $success = "Movie added successfully!";
+            $_POST = array();
+            
+        } catch (Exception $e) {
+            $conn->rollback();
+            $error = $e->getMessage();
         }
-        $venue_check->close();
     }
 }
 
 // ============================================
 // UPDATE MOVIE
 // ============================================
-elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_movie'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_movie'])) {
     $id = intval($_POST['id']);
     $title = htmlspecialchars(trim($_POST['title']), ENT_QUOTES, 'UTF-8');
     $director = htmlspecialchars(trim($_POST['director'] ?? ''), ENT_QUOTES, 'UTF-8');
@@ -90,72 +113,206 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_movie'])) 
     $description = trim($_POST['description']);
     $poster_url = htmlspecialchars(trim($_POST['poster_url'] ?? ''), ENT_QUOTES, 'UTF-8');
     $trailer_url = htmlspecialchars(trim($_POST['trailer_url'] ?? ''), ENT_QUOTES, 'UTF-8');
-    $venue_id = !empty($_POST['venue_id']) ? intval($_POST['venue_id']) : null;
-    $standard_price = floatval($_POST['standard_price'] ?? 350);
-    $premium_price = floatval($_POST['premium_price'] ?? 450);
-    $sweet_spot_price = floatval($_POST['sweet_spot_price'] ?? 550);
+    $is_active = isset($_POST['is_active']) ? 1 : 0;
+    $selected_screens = isset($_POST['screen_ids']) ? $_POST['screen_ids'] : [];
     
     if (empty($title) || empty($genre) || empty($duration) || empty($rating) || empty($description)) {
         $error = "All required fields must be filled!";
-    } elseif ($venue_id === null || $venue_id <= 0) {
-        $error = "Please select a venue!";
+    } elseif (empty($selected_screens)) {
+        $error = "Please select at least one screen!";
     } else {
-        // Verify venue exists
-        $venue_check = $conn->prepare("SELECT id FROM venues WHERE id = ?");
-        $venue_check->bind_param("i", $venue_id);
-        $venue_check->execute();
-        $venue_result = $venue_check->get_result();
+        $conn->begin_transaction();
         
-        if ($venue_result->num_rows === 0) {
-            $error = "Selected venue does not exist!";
-        } else {
-            $stmt = $conn->prepare("UPDATE movies SET title = ?, director = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, venue_id = ?, standard_price = ?, premium_price = ?, sweet_spot_price = ?, updated_by = ? WHERE id = ?");
-            $stmt->bind_param("sssssssssdddii", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $venue_id, $standard_price, $premium_price, $sweet_spot_price, $_SESSION['user_id'], $id);
+        try {
+            // Update movie
+            $stmt = $conn->prepare("UPDATE movies SET title = ?, director = ?, genre = ?, duration = ?, rating = ?, description = ?, poster_url = ?, trailer_url = ?, is_active = ?, updated_by = ? WHERE id = ?");
+            $stmt->bind_param("sssssssssii", $title, $director, $genre, $duration, $rating, $description, $poster_url, $trailer_url, $is_active, $_SESSION['user_id'], $id);
             
-            if ($stmt->execute()) {
-                $success = "Movie updated successfully!";
-            } else {
-                $error = "Failed to update movie: " . $stmt->error;
+            if (!$stmt->execute()) {
+                throw new Exception("Failed to update movie: " . $stmt->error);
             }
             $stmt->close();
+            
+            // Delete existing prices
+            $delete_stmt = $conn->prepare("DELETE FROM movie_screen_prices WHERE movie_id = ?");
+            $delete_stmt->bind_param("i", $id);
+            if (!$delete_stmt->execute()) {
+                throw new Exception("Failed to remove existing prices: " . $delete_stmt->error);
+            }
+            $delete_stmt->close();
+            
+            // Insert updated prices
+            $price_stmt = $conn->prepare("INSERT INTO movie_screen_prices (movie_id, screen_id, seat_type_id, price, is_active) VALUES (?, ?, ?, ?, 1)");
+            
+            foreach ($selected_screens as $screen_id) {
+                $standard_price = floatval($_POST['standard_price_' . $screen_id] ?? 350);
+                $premium_price = floatval($_POST['premium_price_' . $screen_id] ?? 450);
+                $sweet_spot_price = floatval($_POST['sweet_spot_price_' . $screen_id] ?? 550);
+                
+                // Get seat type IDs
+                $seat_types = $conn->query("SELECT id, name FROM seat_types WHERE is_active = 1");
+                $seat_type_ids = [];
+                while ($st = $seat_types->fetch_assoc()) {
+                    $seat_type_ids[$st['name']] = $st['id'];
+                }
+                
+                // Standard seat price
+                if (isset($seat_type_ids['Standard'])) {
+                    $price_stmt->bind_param("iiid", $id, $screen_id, $seat_type_ids['Standard'], $standard_price);
+                    $price_stmt->execute();
+                }
+                
+                // Premium seat price
+                if (isset($seat_type_ids['Premium'])) {
+                    $price_stmt->bind_param("iiid", $id, $screen_id, $seat_type_ids['Premium'], $premium_price);
+                    $price_stmt->execute();
+                }
+                
+                // Sweet Spot seat price
+                if (isset($seat_type_ids['Sweet Spot'])) {
+                    $price_stmt->bind_param("iiid", $id, $screen_id, $seat_type_ids['Sweet Spot'], $sweet_spot_price);
+                    $price_stmt->execute();
+                }
+            }
+            $price_stmt->close();
+            
+            $conn->commit();
+            $success = "Movie updated successfully!";
+            $edit_mode = false;
+            
+        } catch (Exception $e) {
+            $conn->rollback();
+            $error = $e->getMessage();
         }
-        $venue_check->close();
     }
 }
 
 // ============================================
-// DELETE MOVIE
+// DELETE MOVIE (Soft Delete)
 // ============================================
-elseif (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
+if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $id = intval($_GET['delete']);
     
-    $stmt = $conn->prepare("UPDATE movies SET is_active = 0 WHERE id = ?");
-    $stmt->bind_param("i", $id);
+    // Check if movie has schedules
+    $check_stmt = $conn->prepare("SELECT COUNT(*) as count FROM schedules WHERE movie_id = ? AND is_active = 1");
+    $check_stmt->bind_param("i", $id);
+    $check_stmt->execute();
+    $result = $check_stmt->get_result();
+    $schedule_count = $result->fetch_assoc()['count'];
+    $check_stmt->close();
     
-    if ($stmt->execute()) {
-        $success = "Movie deleted successfully!";
+    if ($schedule_count > 0) {
+        $error = "Cannot delete movie with $schedule_count active schedule(s). Remove the schedules first.";
     } else {
-        $error = "Failed to delete movie: " . $stmt->error;
+        $stmt = $conn->prepare("UPDATE movies SET is_active = 0 WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        
+        if ($stmt->execute()) {
+            $success = "Movie deleted successfully!";
+        } else {
+            $error = "Failed to delete movie: " . $stmt->error;
+        }
+        $stmt->close();
     }
-    $stmt->close();
 }
 
 // ============================================
-// FETCH ALL MOVIES with Venue Information
+// GET MOVIE FOR EDITING
 // ============================================
+if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
+    $edit_id = intval($_GET['edit']);
+    
+    $stmt = $conn->prepare("
+        SELECT m.*, u1.u_name as added_by_name, u2.u_name as updated_by_name
+        FROM movies m
+        LEFT JOIN users u1 ON m.added_by = u1.u_id
+        LEFT JOIN users u2 ON m.updated_by = u2.u_id
+        WHERE m.id = ? AND m.is_active = 1
+    ");
+    $stmt->bind_param("i", $edit_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $edit_movie = $result->fetch_assoc();
+    $stmt->close();
+    
+    if ($edit_movie) {
+        // Get selected screens for this movie
+        $screens_stmt = $conn->prepare("
+            SELECT msp.screen_id, msp.seat_type_id, msp.price
+            FROM movie_screen_prices msp
+            WHERE msp.movie_id = ? AND msp.is_active = 1
+        ");
+        $screens_stmt->bind_param("i", $edit_id);
+        $screens_stmt->execute();
+        $screens_result = $screens_stmt->get_result();
+        
+        $edit_movie['selected_screens'] = [];
+        $edit_movie['screen_prices'] = [];
+        
+        while ($row = $screens_result->fetch_assoc()) {
+            if (!in_array($row['screen_id'], $edit_movie['selected_screens'])) {
+                $edit_movie['selected_screens'][] = $row['screen_id'];
+            }
+            
+            // Get seat type name
+            $seat_type_stmt = $conn->prepare("SELECT name FROM seat_types WHERE id = ?");
+            $seat_type_stmt->bind_param("i", $row['seat_type_id']);
+            $seat_type_stmt->execute();
+            $seat_type_result = $seat_type_stmt->get_result();
+            $seat_type = $seat_type_result->fetch_assoc();
+            $seat_type_stmt->close();
+            
+            $edit_movie['screen_prices'][$row['screen_id']][$seat_type['name']] = $row['price'];
+        }
+        $screens_stmt->close();
+        $edit_mode = true;
+    }
+}
+
+// ============================================
+// FETCH DATA FOR DISPLAY
+// ============================================
+
+// Get all screens with venue information
+$screens_result = $conn->query("
+    SELECT 
+        s.id as screen_id,
+        s.screen_name,
+        s.screen_number,
+        s.capacity,
+        v.id as venue_id,
+        v.venue_name,
+        v.venue_location,
+        CONCAT(v.venue_name, ' - ', s.screen_name, ' (Screen ', s.screen_number, ')') as display_name
+    FROM screens s
+    JOIN venues v ON s.venue_id = v.id
+    WHERE s.is_active = 1 AND v.is_active = 1
+    ORDER BY v.venue_name, s.screen_number
+");
+
+$screens = [];
+if ($screens_result) {
+    while ($row = $screens_result->fetch_assoc()) {
+        $screens[] = $row;
+    }
+}
+
+// Get all movies with their screen assignments and prices
 $movies_result = $conn->query("
-    SELECT m.*, 
-           v.venue_name, 
-           v.venue_location, 
-           v.google_maps_link,
-           v.venue_photo_path,
-           a.u_name as added_by_name,
-           u.u_name as updated_by_name
+    SELECT 
+        m.*,
+        GROUP_CONCAT(DISTINCT CONCAT(v.venue_name, ' - ', s.screen_name) ORDER BY v.venue_name SEPARATOR '<br>') as screen_names,
+        COUNT(DISTINCT msp.screen_id) as screen_count,
+        a.u_name as added_by_name,
+        u.u_name as updated_by_name
     FROM movies m
-    LEFT JOIN venues v ON m.venue_id = v.id
+    LEFT JOIN movie_screen_prices msp ON m.id = msp.movie_id AND msp.is_active = 1
+    LEFT JOIN screens s ON msp.screen_id = s.id
+    LEFT JOIN venues v ON s.venue_id = v.id
     LEFT JOIN users a ON m.added_by = a.u_id
     LEFT JOIN users u ON m.updated_by = u.u_id
-    WHERE m.is_active = 1 
+    WHERE m.is_active = 1
+    GROUP BY m.id
     ORDER BY m.created_at DESC
 ");
 
@@ -166,50 +323,17 @@ if ($movies_result) {
     }
 }
 
-// ============================================
-// FETCH ALL VENUES for Dropdown
-// ============================================
-$venues_result = $conn->query("SELECT id, venue_name, venue_location FROM venues ORDER BY venue_name");
-$venues = [];
-if ($venues_result) {
-    while ($row = $venues_result->fetch_assoc()) {
-        $venues[] = $row;
-    }
-}
-
-// ============================================
-// GET EDIT MOVIE DATA
-// ============================================
-if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
-    $edit_id = intval($_GET['edit']);
-    $stmt = $conn->prepare("
-        SELECT m.*, 
-               v.venue_name, 
-               v.venue_location, 
-               v.google_maps_link,
-               v.venue_photo_path,
-               a.u_name as added_by_name,
-               u.u_name as updated_by_name
-        FROM movies m
-        LEFT JOIN venues v ON m.venue_id = v.id
-        LEFT JOIN users a ON m.added_by = a.u_id
-        LEFT JOIN users u ON m.updated_by = u.u_id
-        WHERE m.id = ? AND m.is_active = 1
-    ");
-    if ($stmt) {
-        $stmt->bind_param("i", $edit_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $edit_movie = $result->fetch_assoc();
-        $edit_mode = !empty($edit_movie);
-        $stmt->close();
-    }
-}
-
 $count_result = $conn->query("SELECT COUNT(*) as total FROM movies WHERE is_active = 1");
 $movie_count = $count_result ? $count_result->fetch_assoc()['total'] : 0;
 
-$conn->close();
+// Get seat types for price display
+$seat_types_result = $conn->query("SELECT id, name, default_price, color_code FROM seat_types WHERE is_active = 1 ORDER BY sort_order");
+$seat_types = [];
+if ($seat_types_result) {
+    while ($row = $seat_types_result->fetch_assoc()) {
+        $seat_types[] = $row;
+    }
+}
 ?>
 
 <div class="admin-content" style="max-width: 1400px; margin: 0 auto; padding: 30px;">
@@ -239,8 +363,7 @@ $conn->close();
         
         <?php if ($edit_mode): ?>
         <div style="background: rgba(23, 162, 184, 0.2); color: #17a2b8; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; font-weight: 600; border: 1px solid rgba(23, 162, 184, 0.3);">
-            <i class="fas fa-info-circle"></i> 
-            Editing: <strong><?php echo htmlspecialchars($edit_movie['title']); ?></strong>
+            <i class="fas fa-info-circle"></i> Editing: <strong><?php echo htmlspecialchars($edit_movie['title']); ?></strong>
         </div>
         <?php endif; ?>
         
@@ -249,16 +372,14 @@ $conn->close();
             <input type="hidden" name="id" value="<?php echo $edit_movie['id']; ?>">
             <?php endif; ?>
             
-            <!-- Basic Movie Information -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; margin-bottom: 30px;">
                 <div>
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-film"></i> Movie Title *
                     </label>
                     <input type="text" id="title" name="title" required 
-                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['title'], ENT_QUOTES, 'UTF-8') : (isset($_POST['title']) ? htmlspecialchars($_POST['title'], ENT_QUOTES, 'UTF-8') : ''); ?>"
-                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           placeholder="Enter movie title">
+                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['title']) : (isset($_POST['title']) ? htmlspecialchars($_POST['title']) : ''); ?>"
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;">
                 </div>
                 
                 <div>
@@ -266,9 +387,8 @@ $conn->close();
                         <i class="fas fa-user"></i> Director
                     </label>
                     <input type="text" id="director" name="director" 
-                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['director'] ?? '', ENT_QUOTES, 'UTF-8') : (isset($_POST['director']) ? htmlspecialchars($_POST['director'], ENT_QUOTES, 'UTF-8') : ''); ?>"
-                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           placeholder="Enter director's name">
+                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['director'] ?? '') : (isset($_POST['director']) ? htmlspecialchars($_POST['director']) : ''); ?>"
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;">
                 </div>
                 
                 <div>
@@ -276,9 +396,8 @@ $conn->close();
                         <i class="fas fa-tag"></i> Genre *
                     </label>
                     <input type="text" id="genre" name="genre" required
-                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['genre'], ENT_QUOTES, 'UTF-8') : (isset($_POST['genre']) ? htmlspecialchars($_POST['genre'], ENT_QUOTES, 'UTF-8') : ''); ?>"
-                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           placeholder="e.g., Action, Comedy, Drama">
+                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['genre']) : (isset($_POST['genre']) ? htmlspecialchars($_POST['genre']) : ''); ?>"
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;">
                 </div>
             </div>
 
@@ -287,17 +406,16 @@ $conn->close();
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-clock"></i> Duration *
                     </label>
-                    <input type="text" id="duration" name="duration" required
-                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['duration'], ENT_QUOTES, 'UTF-8') : (isset($_POST['duration']) ? htmlspecialchars($_POST['duration'], ENT_QUOTES, 'UTF-8') : ''); ?>"
-                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           placeholder="e.g., 2h 15m">
+                    <input type="text" id="duration" name="duration" required placeholder="e.g., 2h 28min"
+                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['duration']) : (isset($_POST['duration']) ? htmlspecialchars($_POST['duration']) : ''); ?>"
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;">
                 </div>
                 
                 <div>
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-star"></i> Rating *
                     </label>
-                    <select id="rating" name="rating" required style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem; cursor: pointer; appearance: none;">
+                    <select id="rating" name="rating" required style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem; cursor: pointer;">
                         <option value="" style="background: #2c3e50; color: white;">Select Rating</option>
                         <option value="G" style="background: #2c3e50; color: white;" <?php echo ($edit_mode && $edit_movie['rating'] == 'G') || (isset($_POST['rating']) && $_POST['rating'] == 'G') ? 'selected' : ''; ?>>G - General Audiences</option>
                         <option value="PG" style="background: #2c3e50; color: white;" <?php echo ($edit_mode && $edit_movie['rating'] == 'PG') || (isset($_POST['rating']) && $_POST['rating'] == 'PG') ? 'selected' : ''; ?>>PG - Parental Guidance</option>
@@ -315,23 +433,27 @@ $conn->close();
                 <textarea id="description" name="description" rows="5" style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem; resize: vertical;"
                           placeholder="Enter movie description" required><?php 
                     if ($edit_mode) {
-                        echo htmlspecialchars($edit_movie['description'], ENT_QUOTES, 'UTF-8');
+                        echo htmlspecialchars($edit_movie['description']);
                     } elseif (isset($_POST['description'])) {
-                        echo htmlspecialchars($_POST['description'], ENT_QUOTES, 'UTF-8');
+                        echo htmlspecialchars($_POST['description']);
                     }
                 ?></textarea>
             </div>
 
-            <!-- Images and Trailers -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; margin-bottom: 30px;">
                 <div>
                     <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
                         <i class="fas fa-image"></i> Poster Image URL
                     </label>
                     <input type="url" id="poster_url" name="poster_url" 
-                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['poster_url'] ?? '', ENT_QUOTES, 'UTF-8') : (isset($_POST['poster_url']) ? htmlspecialchars($_POST['poster_url'], ENT_QUOTES, 'UTF-8') : ''); ?>"
-                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           placeholder="https://example.com/image.jpg">
+                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['poster_url'] ?? '') : (isset($_POST['poster_url']) ? htmlspecialchars($_POST['poster_url']) : ''); ?>"
+                           placeholder="https://example.com/poster.jpg"
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;">
+                    <?php if ($edit_mode && !empty($edit_movie['poster_url'])): ?>
+                    <div style="margin-top: 8px;">
+                        <img src="<?php echo $edit_movie['poster_url']; ?>" alt="Current Poster" style="max-height: 100px; border-radius: 5px;">
+                    </div>
+                    <?php endif; ?>
                 </div>
                 
                 <div>
@@ -339,120 +461,118 @@ $conn->close();
                         <i class="fas fa-video"></i> Trailer URL (YouTube)
                     </label>
                     <input type="url" id="trailer_url" name="trailer_url" 
-                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['trailer_url'] ?? '', ENT_QUOTES, 'UTF-8') : (isset($_POST['trailer_url']) ? htmlspecialchars($_POST['trailer_url'], ENT_QUOTES, 'UTF-8') : ''); ?>"
-                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;"
-                           placeholder="https://youtube.com/watch?v=...">
+                           value="<?php echo $edit_mode ? htmlspecialchars($edit_movie['trailer_url'] ?? '') : (isset($_POST['trailer_url']) ? htmlspecialchars($_POST['trailer_url']) : ''); ?>"
+                           placeholder="https://www.youtube.com/watch?v=..."
+                           style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem;">
                 </div>
             </div>
+            
+            <?php if ($edit_mode): ?>
+            <div style="margin-bottom: 30px;">
+                <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
+                    <i class="fas fa-toggle-on"></i> Status
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" name="is_active" value="1" <?php echo $edit_movie['is_active'] ? 'checked' : ''; ?>>
+                    <span style="color: white;">Active (available for scheduling)</span>
+                </label>
+            </div>
+            <?php endif; ?>
 
-            <!-- VENUE INFORMATION SECTION - NOW USING DROPDOWN -->
+            <!-- Screen Selection and Pricing -->
             <div style="background: rgba(52, 152, 219, 0.1); border-radius: 15px; padding: 25px; margin-bottom: 30px; border: 1px solid rgba(52, 152, 219, 0.3);">
                 <h3 style="color: white; font-size: 1.4rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
-                    <i class="fas fa-map-marker-alt" style="color: #e74c3c;"></i> Venue Information
-                </h3>
-                
-                <div style="margin-bottom: 20px;">
-                    <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
-                        <i class="fas fa-building"></i> Select Venue *
-                    </label>
-                    
-                    <?php if (empty($venues)): ?>
-                        <div style="background: rgba(241, 196, 15, 0.2); color: #f39c12; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                            <i class="fas fa-exclamation-triangle"></i> 
-                            No venues available. Please <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" style="color: #f39c12; text-decoration: underline;">add a venue first</a> before adding movies.
-                        </div>
-                    <?php else: ?>
-                        <select id="venue_id" name="venue_id" required style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(52, 152, 219, 0.3); border-radius: 10px; color: white; font-size: 1rem; cursor: pointer;">
-                            <option value="" style="background: #2c3e50; color: white;">-- Select Venue --</option>
-                            <?php foreach ($venues as $venue): ?>
-                            <option value="<?php echo $venue['id']; ?>" 
-                                <?php 
-                                    if ($edit_mode && $edit_movie['venue_id'] == $venue['id']) echo 'selected';
-                                    if (isset($_POST['venue_id']) && $_POST['venue_id'] == $venue['id']) echo 'selected';
-                                ?>
-                                style="background: #2c3e50; color: white;">
-                                <?php echo htmlspecialchars($venue['venue_name']); ?> 
-                                (<?php echo htmlspecialchars($venue['venue_location']); ?>)
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    <?php endif; ?>
-                    
-                    <div style="margin-top: 10px;">
-                        <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" target="_blank" 
-                           style="color: #3498db; text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 5px;">
-                            <i class="fas fa-plus-circle"></i> + Add New Venue
-                        </a>
-                        <span style="color: rgba(255, 255, 255, 0.4); margin: 0 10px;">|</span>
-                        <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" target="_blank" 
-                           style="color: #2ecc71; text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 5px;">
-                            <i class="fas fa-edit"></i> Manage Venues
-                        </a>
-                    </div>
-                </div>
-                
-                <!-- Display selected venue details if editing -->
-                <?php if ($edit_mode && !empty($edit_movie['venue_name'])): ?>
-                <div style="background: rgba(0,0,0,0.2); border-radius: 10px; padding: 15px; margin-top: 15px;">
-                    <div style="color: var(--pale-red); font-size: 0.85rem; margin-bottom: 8px;">
-                        <i class="fas fa-info-circle"></i> Current Venue Details:
-                    </div>
-                    <div style="color: white; font-size: 0.95rem;">
-                        <strong><?php echo htmlspecialchars($edit_movie['venue_name']); ?></strong><br>
-                        <?php echo htmlspecialchars($edit_movie['venue_location']); ?>
-                    </div>
-                    <?php if (!empty($edit_movie['google_maps_link'])): ?>
-                    <div style="margin-top: 8px;">
-                        <a href="<?php echo htmlspecialchars($edit_movie['google_maps_link']); ?>" target="_blank" 
-                           style="color: #3498db; font-size: 0.85rem; text-decoration: none;">
-                            <i class="fas fa-map-marked-alt"></i> View on Google Maps
-                        </a>
-                    </div>
-                    <?php endif; ?>
-                </div>
-                <?php endif; ?>
-            </div>
-
-            <!-- Seat Pricing Section (Unchanged) -->
-            <div style="margin-bottom: 30px;">
-                <h3 style="color: white; font-size: 1.4rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
-                    <i class="fas fa-tags"></i> Seat Pricing
+                    <i class="fas fa-tv" style="color: #e74c3c;"></i> Select Screens & Set Prices *
                 </h3>
                 <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 20px; font-size: 0.95rem;">
-                    Set custom prices for each seat type. These prices will be used when creating schedules for this movie.
+                    Select all screens where this movie will be shown. Each screen can have different ticket prices.
                 </p>
                 
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 25px;">
-                    <div>
-                        <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
-                            <i class="fas fa-chair" style="color: #3498db;"></i> Standard Price (₱)
-                        </label>
-                        <input type="number" id="standard_price" name="standard_price" step="0.01" min="0" required
-                               value="<?php echo $edit_mode ? ($edit_movie['standard_price'] ?? 350) : (isset($_POST['standard_price']) ? $_POST['standard_price'] : 350); ?>"
-                               style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid #3498db; border-radius: 10px; color: white; font-size: 1rem;"
-                               placeholder="350.00">
+                <?php if (empty($screens)): ?>
+                    <div style="background: rgba(241, 196, 15, 0.2); color: #f39c12; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                        <i class="fas fa-exclamation-triangle"></i> 
+                        No screens available. Please <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" style="color: #f39c12; text-decoration: underline;">add a venue and screen first</a> before adding movies.
+                    </div>
+                <?php else: ?>
+                    <div id="screensContainer">
+                        <?php foreach ($screens as $screen): 
+                            $is_checked = false;
+                            $standard_price = 350;
+                            $premium_price = 450;
+                            $sweet_spot_price = 550;
+                            
+                            if ($edit_mode && isset($edit_movie['selected_screens'])) {
+                                $is_checked = in_array($screen['screen_id'], $edit_movie['selected_screens']);
+                                if ($is_checked && isset($edit_movie['screen_prices'][$screen['screen_id']])) {
+                                    $standard_price = $edit_movie['screen_prices'][$screen['screen_id']]['Standard'] ?? 350;
+                                    $premium_price = $edit_movie['screen_prices'][$screen['screen_id']]['Premium'] ?? 450;
+                                    $sweet_spot_price = $edit_movie['screen_prices'][$screen['screen_id']]['Sweet Spot'] ?? 550;
+                                }
+                            } elseif (isset($_POST['screen_ids'])) {
+                                $is_checked = in_array($screen['screen_id'], $_POST['screen_ids']);
+                                $standard_price = isset($_POST['standard_price_' . $screen['screen_id']]) ? floatval($_POST['standard_price_' . $screen['screen_id']]) : 350;
+                                $premium_price = isset($_POST['premium_price_' . $screen['screen_id']]) ? floatval($_POST['premium_price_' . $screen['screen_id']]) : 450;
+                                $sweet_spot_price = isset($_POST['sweet_spot_price_' . $screen['screen_id']]) ? floatval($_POST['sweet_spot_price_' . $screen['screen_id']]) : 550;
+                            }
+                        ?>
+                        <div class="screen-item" data-screen-id="<?php echo $screen['screen_id']; ?>" style="margin-bottom: 20px; border: 1px solid <?php echo $is_checked ? '#3498db' : 'rgba(255,255,255,0.1)'; ?>; border-radius: 12px; padding: 15px; background: rgba(255,255,255,0.03); transition: all 0.3s ease;">
+                            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 2; min-width: 250px;">
+                                    <input type="checkbox" name="screen_ids[]" value="<?php echo $screen['screen_id']; ?>" 
+                                           class="screen-checkbox" data-screen-id="<?php echo $screen['screen_id']; ?>"
+                                           <?php echo $is_checked ? 'checked' : ''; ?>
+                                           style="width: 20px; height: 20px; cursor: pointer; accent-color: #3498db;">
+                                    <div>
+                                        <div style="color: white; font-weight: 700; font-size: 1.1rem;">
+                                            <?php echo htmlspecialchars($screen['venue_name']); ?> - <?php echo htmlspecialchars($screen['screen_name']); ?>
+                                        </div>
+                                        <div style="color: rgba(255,255,255,0.5); font-size: 0.8rem;">
+                                            Screen #<?php echo $screen['screen_number']; ?> | Capacity: <?php echo number_format($screen['capacity']); ?> seats
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                            
+                            <div class="screen-prices" style="display: <?php echo $is_checked ? 'grid' : 'none'; ?>; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                                <div>
+                                    <label style="display: block; color: #3498db; font-size: 0.85rem; font-weight: 600; margin-bottom: 5px;">
+                                        <i class="fas fa-chair"></i> Standard Price (₱)
+                                    </label>
+                                    <input type="number" name="standard_price_<?php echo $screen['screen_id']; ?>" 
+                                           value="<?php echo $standard_price; ?>" step="0.01" min="0"
+                                           class="price-input" data-screen-id="<?php echo $screen['screen_id']; ?>"
+                                           style="width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.08); border: 2px solid #3498db; border-radius: 8px; color: white; font-size: 0.9rem;">
+                                </div>
+                                <div>
+                                    <label style="display: block; color: #2ecc71; font-size: 0.85rem; font-weight: 600; margin-bottom: 5px;">
+                                        <i class="fas fa-crown"></i> Premium Price (₱)
+                                    </label>
+                                    <input type="number" name="premium_price_<?php echo $screen['screen_id']; ?>" 
+                                           value="<?php echo $premium_price; ?>" step="0.01" min="0"
+                                           class="price-input" data-screen-id="<?php echo $screen['screen_id']; ?>"
+                                           style="width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.08); border: 2px solid #2ecc71; border-radius: 8px; color: white; font-size: 0.9rem;">
+                                </div>
+                                <div>
+                                    <label style="display: block; color: #e74c3c; font-size: 0.85rem; font-weight: 600; margin-bottom: 5px;">
+                                        <i class="fas fa-star"></i> Sweet Spot Price (₱)
+                                    </label>
+                                    <input type="number" name="sweet_spot_price_<?php echo $screen['screen_id']; ?>" 
+                                           value="<?php echo $sweet_spot_price; ?>" step="0.01" min="0"
+                                           class="price-input" data-screen-id="<?php echo $screen['screen_id']; ?>"
+                                           style="width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.08); border: 2px solid #e74c3c; border-radius: 8px; color: white; font-size: 0.9rem;">
+                                </div>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
                     </div>
                     
-                    <div>
-                        <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
-                            <i class="fas fa-crown" style="color: #2ecc71;"></i> Premium Price (₱)
-                        </label>
-                        <input type="number" id="premium_price" name="premium_price" step="0.01" min="0" required
-                               value="<?php echo $edit_mode ? ($edit_movie['premium_price'] ?? 450) : (isset($_POST['premium_price']) ? $_POST['premium_price'] : 450); ?>"
-                               style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid #2ecc71; border-radius: 10px; color: white; font-size: 1rem;"
-                               placeholder="450.00">
+                    <div style="margin-top: 15px;">
+                        <a href="<?php echo SITE_URL; ?>index.php?page=admin/manage-venues" target="_blank" 
+                           style="color: #3498db; text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 5px;">
+                            <i class="fas fa-plus-circle"></i> + Add New Venue/Screen
+                        </a>
                     </div>
-                    
-                    <div>
-                        <label style="display: block; color: white; font-weight: 600; margin-bottom: 10px; font-size: 1rem;">
-                            <i class="fas fa-star" style="color: #e74c3c;"></i> Sweet Spot Price (₱)
-                        </label>
-                        <input type="number" id="sweet_spot_price" name="sweet_spot_price" step="0.01" min="0" required
-                               value="<?php echo $edit_mode ? ($edit_movie['sweet_spot_price'] ?? 550) : (isset($_POST['sweet_spot_price']) ? $_POST['sweet_spot_price'] : 550); ?>"
-                               style="width: 100%; padding: 14px 16px; background: rgba(255, 255, 255, 0.08); border: 2px solid #e74c3c; border-radius: 10px; color: white; font-size: 1rem;"
-                               placeholder="550.00">
-                    </div>
-                </div>
+                <?php endif; ?>
             </div>
             
             <div style="text-align: center; margin-top: 30px;">
@@ -472,7 +592,7 @@ $conn->close();
         </form>
     </div>
 
-    <!-- Movies List Table (Updated to show venue from joined table) -->
+    <!-- Movies List -->
     <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 30px; border: 1px solid rgba(52, 152, 219, 0.2);">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #3498db; display: flex; align-items: center; gap: 10px;">
             <i class="fas fa-film"></i> All Movies (<?php echo $movie_count; ?>)
@@ -492,12 +612,11 @@ $conn->close();
                         <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Poster</th>
                         <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Movie Details</th>
                         <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Director</th>
-                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Seat Prices</th>
-                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Venue</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Screens</th>
                         <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Trailer</th>
-                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Admin Info</th>
+                        <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Status</th>
                         <th style="color: white; padding: 16px; text-align: left; font-weight: 700; font-size: 1rem;">Actions</th>
-                    </tr>
+                    </td>
                 </thead>
                 <tbody>
                     <?php foreach ($movies as $movie): ?>
@@ -506,7 +625,7 @@ $conn->close();
                         <td style="padding: 16px;">
                             <?php if (!empty($movie['poster_url'])): ?>
                             <img src="<?php echo $movie['poster_url']; ?>" 
-                                 alt="<?php echo htmlspecialchars($movie['title'], ENT_QUOTES, 'UTF-8'); ?>"
+                                 alt="<?php echo htmlspecialchars($movie['title']); ?>"
                                  style="width: 70px; height: 100px; object-fit: cover; border-radius: 8px; border: 2px solid rgba(52, 152, 219, 0.3);">
                             <?php else: ?>
                             <div style="width: 70px; height: 100px; background: rgba(52, 152, 219, 0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 2px solid rgba(52, 152, 219, 0.2);">
@@ -515,58 +634,39 @@ $conn->close();
                             <?php endif; ?>
                         </td>
                         <td style="padding: 16px;">
-                            <div style="color: white; font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;"><?php echo htmlspecialchars($movie['title'], ENT_QUOTES, 'UTF-8'); ?></div>
+                            <div style="color: white; font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;"><?php echo htmlspecialchars($movie['title']); ?></div>
                             <div style="margin-bottom: 8px;">
                                 <span style="background: #3498db; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700; margin-right: 5px;">
                                     <?php echo $movie['rating']; ?>
                                 </span>
                                 <span style="color: rgba(255, 255, 255, 0.8); font-size: 0.9rem;">
-                                    <?php echo htmlspecialchars($movie['genre'], ENT_QUOTES, 'UTF-8'); ?> • <?php echo $movie['duration']; ?>
+                                    <?php echo htmlspecialchars($movie['genre'] ?? ''); ?> • <?php echo $movie['duration']; ?>
                                 </span>
                             </div>
                             <?php if (!empty($movie['description'])): ?>
                             <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.7); margin-top: 8px; max-width: 400px;">
-                                <?php echo substr(htmlspecialchars($movie['description'], ENT_QUOTES, 'UTF-8'), 0, 120); ?>...
+                                <?php echo substr(htmlspecialchars($movie['description']), 0, 120); ?>...
                             </p>
                             <?php endif; ?>
                         </td>
                         <td style="padding: 16px; color: rgba(255, 255, 255, 0.8);">
-                            <?php echo htmlspecialchars($movie['director'] ?? 'N/A', ENT_QUOTES, 'UTF-8'); ?>
+                            <?php echo htmlspecialchars($movie['director'] ?? 'N/A'); ?>
                         </td>
                         <td style="padding: 16px;">
-                            <div style="background: rgba(52, 152, 219, 0.1); padding: 12px; border-radius: 8px;">
-                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                    <i class="fas fa-chair" style="color: #3498db; width: 20px;"></i>
-                                    <span style="color: rgba(255,255,255,0.8);">Standard:</span>
-                                    <span style="color: white; font-weight: 700; margin-left: auto;">₱<?php echo number_format($movie['standard_price'] ?? 350, 2); ?></span>
+                            <?php if (!empty($movie['screen_names']) && $movie['screen_count'] > 0): ?>
+                                <div style="font-size: 0.85rem; line-height: 1.5;">
+                                    <?php echo $movie['screen_names']; ?>
                                 </div>
-                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                    <i class="fas fa-crown" style="color: #2ecc71; width: 20px;"></i>
-                                    <span style="color: rgba(255,255,255,0.8);">Premium:</span>
-                                    <span style="color: white; font-weight: 700; margin-left: auto;">₱<?php echo number_format($movie['premium_price'] ?? 450, 2); ?></span>
-                                </div>
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <i class="fas fa-star" style="color: #e74c3c; width: 20px;"></i>
-                                    <span style="color: rgba(255,255,255,0.8);">Sweet Spot:</span>
-                                    <span style="color: white; font-weight: 700; margin-left: auto;">₱<?php echo number_format($movie['sweet_spot_price'] ?? 550, 2); ?></span>
-                                </div>
-                            </div>
-                        </td>
-                        <td style="padding: 16px;">
-                            <?php if (!empty($movie['venue_name'])): ?>
-                                <div style="color: #2ecc71; font-weight: 600; margin-bottom: 5px;">
-                                    <i class="fas fa-building"></i> <?php echo htmlspecialchars($movie['venue_name'], ENT_QUOTES, 'UTF-8'); ?>
-                                </div>
-                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.85rem;">
-                                    <?php echo htmlspecialchars($movie['venue_location'] ?? '', ENT_QUOTES, 'UTF-8'); ?>
+                                <div style="color: rgba(255, 255, 255, 0.5); font-size: 0.7rem; margin-top: 5px;">
+                                    <?php echo $movie['screen_count']; ?> screen(s)
                                 </div>
                             <?php else: ?>
-                                <span style="color: rgba(255, 255, 255, 0.5);">No venue assigned</span>
+                                <span style="color: rgba(255, 255, 255, 0.5);">No screens assigned</span>
                             <?php endif; ?>
                         </td>
                         <td style="padding: 16px;">
                             <?php if (!empty($movie['trailer_url'])): ?>
-                            <a href="<?php echo htmlspecialchars($movie['trailer_url'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" 
+                            <a href="<?php echo htmlspecialchars($movie['trailer_url']); ?>" target="_blank" 
                                style="color: #3498db; text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(52, 152, 219, 0.1); border-radius: 6px; border: 1px solid rgba(52, 152, 219, 0.3);">
                                 <i class="fas fa-play"></i> Watch
                             </a>
@@ -577,10 +677,12 @@ $conn->close();
                             <?php endif; ?>
                         </td>
                         <td style="padding: 16px;">
-                            <div style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.8);">
-                                <div style="margin-bottom: 5px;"><strong>Added by:</strong> <?php echo $movie['added_by_name'] ?? 'Unknown'; ?></div>
-                                <div><strong>Date:</strong> <?php echo date('M d, Y', strtotime($movie['created_at'])); ?></div>
-                            </div>
+                            <span style="background: <?php echo $movie['is_active'] ? 'rgba(46, 204, 113, 0.2)' : 'rgba(231, 76, 60, 0.2)'; ?>; 
+                                  color: <?php echo $movie['is_active'] ? '#2ecc71' : '#e74c3c'; ?>; 
+                                  padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
+                                <i class="fas <?php echo $movie['is_active'] ? 'fa-check-circle' : 'fa-times-circle'; ?>"></i>
+                                <?php echo $movie['is_active'] ? 'Active' : 'Inactive'; ?>
+                            </span>
                         </td>
                         <td style="padding: 16px;">
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -590,12 +692,13 @@ $conn->close();
                                 </a>
                                 <a href="index.php?page=admin/manage-movies&delete=<?php echo $movie['id']; ?>" 
                                    style="padding: 8px 16px; background: rgba(231, 76, 60, 0.2); color: #e74c3c; text-decoration: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; border: 1px solid rgba(231, 76, 60, 0.3); display: inline-flex; align-items: center; gap: 5px;"
-                                   onclick="return confirm('Are you sure you want to delete \'<?php echo addslashes($movie['title']); ?>\'?')">
+                                   onclick="return confirm('Are you sure you want to delete \'<?php echo addslashes($movie['title']); ?>\'? This will soft delete the movie.')">
                                     <i class="fas fa-trash"></i> Delete
                                 </a>
                             </div>
+                         </div>
                         </td>
-                    </tr>
+                     </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
@@ -626,15 +729,12 @@ $conn->close();
         background: rgba(255, 255, 255, 0.03);
     }
     
-    :root {
-        --admin-primary: #2c3e50;
-        --admin-secondary: #34495e;
-        --admin-accent: #3498db;
-        --admin-success: #2ecc71;
-        --admin-danger: #e74c3c;
-        --admin-warning: #f39c12;
-        --admin-light: #ecf0f1;
-        --admin-dark: #1a252f;
+    .screen-item {
+        transition: all 0.3s ease;
+    }
+    
+    .screen-item:hover {
+        background: rgba(52, 152, 219, 0.1);
     }
     
     @media (max-width: 768px) {
@@ -654,12 +754,12 @@ $conn->close();
 
 <script>
 document.getElementById('movieForm')?.addEventListener('submit', function(e) {
-    const title = document.getElementById('title').value.trim();
-    const genre = document.getElementById('genre').value.trim();
-    const duration = document.getElementById('duration').value.trim();
-    const rating = document.getElementById('rating').value;
-    const description = document.getElementById('description').value.trim();
-    const venueId = document.getElementById('venue_id')?.value;
+    const title = document.getElementById('title')?.value.trim();
+    const genre = document.getElementById('genre')?.value.trim();
+    const duration = document.getElementById('duration')?.value.trim();
+    const rating = document.getElementById('rating')?.value;
+    const description = document.getElementById('description')?.value.trim();
+    const checkedScreens = document.querySelectorAll('.screen-checkbox:checked');
     
     if (!title || !genre || !duration || !rating || !description) {
         e.preventDefault();
@@ -667,27 +767,61 @@ document.getElementById('movieForm')?.addEventListener('submit', function(e) {
         return false;
     }
     
-    if (!venueId || venueId === '') {
+    if (checkedScreens.length === 0) {
         e.preventDefault();
-        alert('Please select a venue!');
+        alert('Please select at least one screen!');
         return false;
     }
     
     return true;
 });
 
-const inputs = document.querySelectorAll('input, select, textarea');
-inputs.forEach(input => {
-    input.addEventListener('focus', function() {
-        this.style.transition = 'all 0.3s ease';
-    });
-    
-    input.addEventListener('blur', function() {
-        this.style.transition = 'none';
+// Screen checkbox toggle
+const screenCheckboxes = document.querySelectorAll('.screen-checkbox');
+screenCheckboxes.forEach(checkbox => {
+    checkbox.addEventListener('change', function() {
+        const screenItem = this.closest('.screen-item');
+        const pricesDiv = screenItem.querySelector('.screen-prices');
+        
+        if (this.checked) {
+            pricesDiv.style.display = 'grid';
+            screenItem.style.borderColor = '#3498db';
+        } else {
+            pricesDiv.style.display = 'none';
+            screenItem.style.borderColor = 'rgba(255,255,255,0.1)';
+        }
     });
 });
+
+// Price input validation
+const priceInputs = document.querySelectorAll('.price-input');
+priceInputs.forEach(input => {
+    input.addEventListener('change', function() {
+        let value = parseFloat(this.value);
+        if (isNaN(value) || value < 0) {
+            this.value = 0;
+        }
+    });
+});
+
+// Auto-format duration input
+const durationInput = document.getElementById('duration');
+if (durationInput) {
+    durationInput.addEventListener('blur', function() {
+        let value = this.value.trim();
+        if (value && !value.includes('min') && !value.includes('hour')) {
+            if (value.includes('h')) {
+                // Already has format like "2h 28min"
+            } else if (value.match(/^\d+$/)) {
+                this.value = value + ' min';
+            }
+        }
+    });
+}
 </script>
 
-</div>
-</body>
-</html>
+<?php
+if (isset($conn) && $conn) {
+    $conn->close();
+}
+?>

@@ -16,41 +16,59 @@ if ($booking_id <= 0) {
     exit();
 }
 
-$conn = get_db();
+$conn = get_db_connection();
 $user_id = $_SESSION['user_id'];
 
-// ============================================
-// UPDATED QUERY: Get booking with venue information from venues table (with fallback from movies)
-// ============================================
+// Get booking details with venue, screen, and movie information using normalized schema
 $booking_stmt = $conn->prepare("
     SELECT 
-        b.*,
-        GROUP_CONCAT(bs.seat_number ORDER BY bs.seat_number SEPARATOR ', ') as seat_list,
-        GROUP_CONCAT(bs.seat_type ORDER BY bs.seat_number SEPARATOR ', ') as seat_type_list,
-        COUNT(bs.id) as total_seats,
-        SUM(bs.price) as total_calculated,
-        u.u_name as customer_name,
-        u.u_email as customer_email,
+        b.id,
+        b.booking_reference,
+        b.total_amount,
+        b.payment_status,
+        b.attendance_status,
+        b.status,
+        b.booked_at,
+        b.verified_at,
+        s.id as schedule_id,
+        s.show_date,
+        s.showtime,
+        s.base_price,
         m.id as movie_id,
+        m.title as movie_title,
         m.poster_url,
         m.genre,
         m.duration,
         m.rating,
-        m.title as movie_title,
-        m.venue_id as movie_venue_id,
-        COALESCE(v.id, mv.id) as venue_id,
-        COALESCE(v.venue_name, mv.venue_name) as venue_name,
-        COALESCE(v.venue_location, mv.venue_location) as venue_location,
-        COALESCE(v.google_maps_link, mv.google_maps_link) as google_maps_link,
-        COALESCE(v.venue_photo_path, mv.venue_photo_path) as venue_photo_path
-    FROM tbl_booking b
-    JOIN users u ON b.u_id = u.u_id
-    LEFT JOIN booked_seats bs ON b.b_id = bs.booking_id
-    LEFT JOIN movies m ON b.movie_name = m.title
-    LEFT JOIN venues v ON b.venue_id = v.id
-    LEFT JOIN venues mv ON m.venue_id = mv.id
-    WHERE b.b_id = ? AND b.u_id = ? AND b.payment_status = 'Paid'
-    GROUP BY b.b_id
+        m.description,
+        sc.id as screen_id,
+        sc.screen_name,
+        sc.screen_number,
+        v.id as venue_id,
+        v.venue_name,
+        v.venue_location,
+        v.google_maps_link,
+        v.venue_photo_path,
+        v.contact_number,
+        v.operating_hours,
+        GROUP_CONCAT(DISTINCT bs.seat_number ORDER BY bs.seat_number SEPARATOR ', ') as seat_list,
+        GROUP_CONCAT(DISTINCT st.name ORDER BY bs.seat_number SEPARATOR ', ') as seat_types,
+        COUNT(DISTINCT bs.id) as total_seats,
+        SUM(DISTINCT bs.price) as calculated_total,
+        a.u_name as verified_by_name,
+        u.u_name as customer_name,
+        u.u_email as customer_email
+    FROM bookings b
+    JOIN users u ON b.user_id = u.u_id
+    JOIN schedules s ON b.schedule_id = s.id
+    JOIN movies m ON s.movie_id = m.id
+    JOIN screens sc ON s.screen_id = sc.id
+    JOIN venues v ON sc.venue_id = v.id
+    LEFT JOIN booked_seats bs ON b.id = bs.booking_id
+    LEFT JOIN seat_types st ON bs.seat_type_id = st.id
+    LEFT JOIN users a ON b.verified_by = a.u_id
+    WHERE b.id = ? AND b.user_id = ? AND b.payment_status = 'paid'
+    GROUP BY b.id
 ");
 $booking_stmt->bind_param("ii", $booking_id, $user_id);
 $booking_stmt->execute();
@@ -65,17 +83,40 @@ if ($booking_result->num_rows === 0) {
 $booking = $booking_result->fetch_assoc();
 $booking_stmt->close();
 
-// Prepare QR code data (will be used by JavaScript)
-$qr_text = $booking['booking_reference'];
-
-$booking_date = date('F d, Y', strtotime($booking['booking_date']));
-$booking_time = date('h:i A', strtotime($booking['booking_date']));
+// Calculate additional info
+$booking_date = date('F d, Y', strtotime($booking['booked_at']));
+$booking_time = date('h:i A', strtotime($booking['booked_at']));
 $show_date = date('l, F d, Y', strtotime($booking['show_date']));
 $show_time = date('h:i A', strtotime($booking['showtime']));
 $seat_count = $booking['total_seats'] ?? 0;
 $seat_list = $booking['seat_list'] ?? 'No seats assigned';
-$is_paid = $booking['payment_status'] == 'Paid';
+$is_paid = $booking['payment_status'] == 'paid';
 $attendance_status = $booking['attendance_status'] ?? 'Pending';
+
+// Prepare QR code data
+$qr_text = $booking['booking_reference'];
+$booking_ref = $booking['booking_reference'];
+
+// Generate embed URL from Google Maps link
+$embed_url = '';
+$has_valid_map = false;
+
+if (!empty($booking['google_maps_link'])) {
+    if (preg_match('/q=([0-9.-]+),([0-9.-]+)/', $booking['google_maps_link'], $matches)) {
+        $lat = $matches[1];
+        $lng = $matches[2];
+        $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
+        $has_valid_map = true;
+    } elseif (preg_match('/@([0-9.-]+),([0-9.-]+)/', $booking['google_maps_link'], $matches)) {
+        $lat = $matches[1];
+        $lng = $matches[2];
+        $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
+        $has_valid_map = true;
+    } else {
+        $embed_url = "https://maps.google.com/maps?q=" . urlencode($booking['venue_location'] ?? $booking['venue_name'] ?? '') . "&z=15&output=embed";
+        $has_valid_map = true;
+    }
+}
 
 $conn->close();
 ?>
@@ -87,7 +128,6 @@ $conn->close();
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Booking Receipt - Movie Ticketing System</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- QR Code Library using pure JavaScript (NO server dependencies!) -->
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <style>
         * {
@@ -128,7 +168,7 @@ $conn->close();
         }
         
         .receipt-header h1 {
-            font-size: 2.2rem;
+            font-size: 2rem;
             margin-bottom: 5px;
             font-weight: 800;
             display: flex;
@@ -138,7 +178,7 @@ $conn->close();
         }
         
         .receipt-header p {
-            font-size: 0.95rem;
+            font-size: 0.85rem;
             opacity: 0.9;
         }
         
@@ -160,7 +200,7 @@ $conn->close();
         
         .receipt-title p {
             color: #666;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
         }
         
         .receipt-info {
@@ -175,34 +215,34 @@ $conn->close();
         
         .info-group h3 {
             color: #666;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             margin-bottom: 5px;
             font-weight: 600;
         }
         
         .info-group .info-value {
             color: #333;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             font-weight: 700;
         }
         
         .info-group .payment-badge {
             display: inline-block;
-            padding: 8px 20px;
+            padding: 6px 15px;
             border-radius: 30px;
             font-weight: 700;
-            font-size: 1rem;
+            font-size: 0.9rem;
             background: <?php echo $is_paid ? '#2ecc71' : '#e74c3c'; ?>;
             color: white;
         }
         
         .attendance-badge {
             display: inline-block;
-            padding: 8px 20px;
+            padding: 6px 15px;
             border-radius: 30px;
             font-weight: 700;
-            font-size: 1rem;
-            background: <?php echo $attendance_status == 'Present' ? '#2ecc71' : ($attendance_status == 'Completed' ? '#3498db' : '#f39c12'); ?>;
+            font-size: 0.9rem;
+            background: <?php echo $attendance_status == 'present' ? '#2ecc71' : ($attendance_status == 'completed' ? '#3498db' : '#f39c12'); ?>;
             color: white;
         }
         
@@ -245,23 +285,23 @@ $conn->close();
         
         .movie-info h3 {
             color: #333;
-            font-size: 1.5rem;
+            font-size: 1.3rem;
             margin-bottom: 10px;
             font-weight: 700;
         }
         
         .movie-meta {
             display: flex;
-            gap: 15px;
+            gap: 12px;
             flex-wrap: wrap;
         }
         
         .movie-meta span {
             background: rgba(226, 48, 32, 0.1);
             color: #e23020;
-            padding: 5px 12px;
+            padding: 4px 10px;
             border-radius: 20px;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             font-weight: 600;
             display: inline-flex;
             align-items: center;
@@ -280,7 +320,7 @@ $conn->close();
         .qr-section h4 {
             color: #e23020;
             margin-bottom: 15px;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
         }
         
         .qr-code {
@@ -316,8 +356,8 @@ $conn->close();
         
         .detail-card h4 {
             color: #e23020;
-            font-size: 1.1rem;
-            margin-bottom: 15px;
+            font-size: 1rem;
+            margin-bottom: 12px;
             font-weight: 700;
             display: flex;
             align-items: center;
@@ -325,153 +365,21 @@ $conn->close();
         }
         
         .detail-item {
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
         
         .detail-item .label {
             color: #666;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             margin-bottom: 3px;
         }
         
         .detail-item .value {
             color: #333;
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-        
-        .price-summary {
-            border: 2px solid #eee;
-            border-radius: 12px;
-            padding: 25px;
-            margin-bottom: 30px;
-        }
-        
-        .price-summary h4 {
-            color: #e23020;
-            font-size: 1.2rem;
-            margin-bottom: 20px;
-            text-align: center;
-            font-weight: 700;
-        }
-        
-        .price-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 12px;
-            padding-bottom: 12px;
-            border-bottom: 1px dashed #ddd;
-            color: #666;
-        }
-        
-        .price-row.total {
-            border-bottom: none;
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 3px double #ddd;
-            font-size: 1.2rem;
-            font-weight: 800;
-            color: #333;
-        }
-        
-        .price-row.total .amount {
-            color: #e23020;
-        }
-        
-        .terms-section {
-            border-top: 2px dashed #ddd;
-            padding-top: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .terms-section h4 {
-            color: #666;
-            font-size: 0.95rem;
-            margin-bottom: 10px;
-            font-weight: 600;
-        }
-        
-        .terms-section ul {
-            color: #666;
-            font-size: 0.85rem;
-            line-height: 1.6;
-            padding-left: 20px;
-        }
-        
-        .receipt-footer {
-            text-align: center;
-            color: #666;
-            font-size: 0.85rem;
-            border-top: 2px solid #e23020;
-            padding-top: 20px;
-        }
-        
-        .action-buttons {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        
-        .btn {
-            padding: 14px 35px;
-            text-decoration: none;
-            border-radius: 10px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            border: none;
-            cursor: pointer;
             font-size: 1rem;
+            font-weight: 600;
         }
         
-        .btn-primary {
-            background: linear-gradient(135deg, #e23020 0%, #c11b18 100%);
-            color: white;
-            box-shadow: 0 4px 15px rgba(226, 48, 32, 0.3);
-        }
-        
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #c11b18 0%, #a80f0f 100%);
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(226, 48, 32, 0.4);
-        }
-        
-        .btn-secondary {
-            background: #3498db;
-            color: white;
-            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
-        }
-        
-        .btn-secondary:hover {
-            background: #2980b9;
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(52, 152, 219, 0.4);
-        }
-        
-        .btn-success {
-            background: #2ecc71;
-            color: white;
-        }
-        
-        .btn-success:hover {
-            background: #27ae60;
-            transform: translateY(-3px);
-        }
-        
-        .btn-close {
-            background: #95a5a6;
-            color: white;
-        }
-        
-        .btn-close:hover {
-            background: #7f8c8d;
-            transform: translateY(-3px);
-        }
-        
-        /* Venue Section Styles */
         .venue-section {
             background: #f8f9fa;
             border-radius: 12px;
@@ -482,8 +390,8 @@ $conn->close();
         
         .venue-section h4 {
             color: #e23020;
-            font-size: 1.1rem;
-            margin-bottom: 15px;
+            font-size: 1rem;
+            margin-bottom: 12px;
             font-weight: 700;
             display: flex;
             align-items: center;
@@ -507,29 +415,160 @@ $conn->close();
         
         .venue-photo img {
             max-width: 100%;
-            max-height: 120px;
+            max-height: 100px;
             border-radius: 8px;
             border: 2px solid rgba(226, 48, 32, 0.3);
         }
         
         .venue-address {
             color: #333;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             line-height: 1.5;
         }
         
         .venue-map-link {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             color: #3498db;
             text-decoration: none;
-            font-size: 0.9rem;
-            margin-top: 8px;
+            font-size: 0.85rem;
+            margin-top: 5px;
         }
         
         .venue-map-link:hover {
             text-decoration: underline;
+        }
+        
+        .price-summary {
+            border: 2px solid #eee;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .price-summary h4 {
+            color: #e23020;
+            font-size: 1.1rem;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 700;
+        }
+        
+        .price-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px dashed #ddd;
+            color: #666;
+        }
+        
+        .price-row.total {
+            border-bottom: none;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 3px double #ddd;
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #333;
+        }
+        
+        .price-row.total .amount {
+            color: #e23020;
+        }
+        
+        .terms-section {
+            border-top: 2px dashed #ddd;
+            padding-top: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .terms-section h4 {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        
+        .terms-section ul {
+            color: #666;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            padding-left: 20px;
+        }
+        
+        .receipt-footer {
+            text-align: center;
+            color: #666;
+            font-size: 0.8rem;
+            border-top: 2px solid #e23020;
+            padding-top: 20px;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 10px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #e23020 0%, #c11b18 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(226, 48, 32, 0.3);
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #c11b18 0%, #a80f0f 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(226, 48, 32, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #3498db;
+            color: white;
+            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+        }
+        
+        .btn-secondary:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(52, 152, 219, 0.4);
+        }
+        
+        .btn-success {
+            background: #2ecc71;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #27ae60;
+            transform: translateY(-2px);
+        }
+        
+        .btn-close {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .btn-close:hover {
+            background: #7f8c8d;
+            transform: translateY(-2px);
         }
         
         @media print {
@@ -602,47 +641,48 @@ $conn->close();
                 <div class="receipt-info">
                     <div class="info-group">
                         <h3>Booking Reference</h3>
-                        <div class="info-value" id="bookingReference"><?php echo htmlspecialchars($booking['booking_reference'] ?? ''); ?></div>
+                        <div class="info-value" id="bookingReference"><?php echo htmlspecialchars($booking['booking_reference']); ?></div>
                     </div>
                     <div class="info-group">
                         <h3>Payment Status</h3>
-                        <span class="payment-badge"><?php echo htmlspecialchars($booking['payment_status'] ?? ''); ?></span>
+                        <span class="payment-badge"><?php echo ucfirst($booking['payment_status']); ?></span>
                     </div>
                     <div class="info-group">
                         <h3>Attendance Status</h3>
                         <span class="attendance-badge">
-                            <?php echo $attendance_status == 'Present' ? '✓ Checked In' : ($attendance_status == 'Completed' ? 'Completed' : 'Pending'); ?>
+                            <?php echo $attendance_status == 'present' ? '✓ Checked In' : ($attendance_status == 'completed' ? 'Completed' : 'Pending'); ?>
                         </span>
                     </div>
                 </div>
                 
-                <!-- QR Code Section - Generated by JavaScript -->
+                <!-- QR Code Section -->
                 <div class="qr-section">
                     <h4><i class="fas fa-qrcode"></i> Scan for Entry</h4>
                     <div class="qr-code">
                         <div id="qrcode"></div>
                     </div>
-                    <p style="color: #666; font-size: 0.85rem; margin-top: 10px;">
+                    <p style="color: #666; font-size: 0.8rem; margin-top: 10px;">
                         Present this QR code at the cinema entrance for verification
                     </p>
-                    <p style="color: #e23020; font-size: 0.8rem; margin-top: 5px;">
+                    <p style="color: #e23020; font-size: 0.75rem; margin-top: 5px;">
                         <i class="fas fa-info-circle"></i> Booking Reference: <strong><?php echo $booking['booking_reference']; ?></strong>
                     </p>
                 </div>
                 
+                <!-- Movie Details -->
                 <div class="movie-details">
                     <div class="movie-poster">
                         <?php if (!empty($booking['poster_url'])): ?>
-                            <img src="<?php echo htmlspecialchars($booking['poster_url']); ?>" alt="<?php echo htmlspecialchars($booking['movie_name'] ?? ''); ?>">
+                            <img src="<?php echo htmlspecialchars($booking['poster_url']); ?>" alt="<?php echo htmlspecialchars($booking['movie_title']); ?>">
                         <?php else: ?>
                             <i class="fas fa-film"></i>
                         <?php endif; ?>
                     </div>
                     <div class="movie-info">
-                        <h3><?php echo htmlspecialchars($booking['movie_name'] ?? ''); ?></h3>
+                        <h3><?php echo htmlspecialchars($booking['movie_title']); ?></h3>
                         <div class="movie-meta">
-                            <span><i class="fas fa-star"></i> <?php echo htmlspecialchars($booking['rating'] ?: 'PG'); ?></span>
-                            <span><i class="fas fa-clock"></i> <?php echo htmlspecialchars($booking['duration'] ?? ''); ?></span>
+                            <span><i class="fas fa-star"></i> <?php echo $booking['rating'] ?: 'PG'; ?></span>
+                            <span><i class="fas fa-clock"></i> <?php echo $booking['duration']; ?></span>
                             <?php if (!empty($booking['genre'])): ?>
                             <span><i class="fas fa-film"></i> <?php echo htmlspecialchars($booking['genre']); ?></span>
                             <?php endif; ?>
@@ -650,8 +690,8 @@ $conn->close();
                     </div>
                 </div>
                 
+                <!-- Details Grid -->
                 <div class="details-grid">
-                    <!-- Show Information Card -->
                     <div class="detail-card">
                         <h4><i class="fas fa-calendar-alt"></i> Show Information</h4>
                         <div class="detail-item">
@@ -664,7 +704,6 @@ $conn->close();
                         </div>
                     </div>
                     
-                    <!-- Seat Information Card -->
                     <div class="detail-card">
                         <h4><i class="fas fa-chair"></i> Seat Information</h4>
                         <div class="detail-item">
@@ -675,22 +714,24 @@ $conn->close();
                             <div class="label">Total Seats</div>
                             <div class="value"><?php echo $seat_count; ?> seat(s)</div>
                         </div>
+                        <div class="detail-item">
+                            <div class="label">Screen</div>
+                            <div class="value"><?php echo htmlspecialchars($booking['screen_name']); ?> (Screen #<?php echo $booking['screen_number']; ?>)</div>
+                        </div>
                     </div>
                     
-                    <!-- Customer Information Card -->
                     <div class="detail-card">
                         <h4><i class="fas fa-user"></i> Customer Information</h4>
                         <div class="detail-item">
                             <div class="label">Name</div>
-                            <div class="value"><?php echo htmlspecialchars($booking['customer_name'] ?? ''); ?></div>
+                            <div class="value"><?php echo htmlspecialchars($booking['customer_name']); ?></div>
                         </div>
                         <div class="detail-item">
                             <div class="label">Email</div>
-                            <div class="value"><?php echo htmlspecialchars($booking['customer_email'] ?? ''); ?></div>
+                            <div class="value"><?php echo htmlspecialchars($booking['customer_email']); ?></div>
                         </div>
                     </div>
                     
-                    <!-- Venue Information Card -->
                     <?php if (!empty($booking['venue_name'])): ?>
                     <div class="detail-card">
                         <h4><i class="fas fa-map-marker-alt"></i> Venue Information</h4>
@@ -715,11 +756,17 @@ $conn->close();
                             </div>
                         </div>
                         <?php endif; ?>
+                        <?php if (!empty($booking['contact_number'])): ?>
+                        <div class="detail-item">
+                            <div class="label">Contact</div>
+                            <div class="value"><?php echo htmlspecialchars($booking['contact_number']); ?></div>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     <?php endif; ?>
                 </div>
                 
-                <!-- Optional: Venue Photo Display Section -->
+                <!-- Venue Photo Section -->
                 <?php if (!empty($booking['venue_photo_path'])): ?>
                 <div class="venue-section">
                     <h4><i class="fas fa-camera"></i> Venue Photo</h4>
@@ -729,6 +776,11 @@ $conn->close();
                                 <strong><?php echo htmlspecialchars($booking['venue_name']); ?></strong><br>
                                 <?php echo htmlspecialchars($booking['venue_location']); ?>
                             </p>
+                            <?php if (!empty($booking['operating_hours'])): ?>
+                            <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">
+                                <i class="fas fa-clock"></i> <?php echo htmlspecialchars($booking['operating_hours']); ?>
+                            </p>
+                            <?php endif; ?>
                             <?php if (!empty($booking['google_maps_link'])): ?>
                             <a href="<?php echo htmlspecialchars($booking['google_maps_link']); ?>" target="_blank" class="venue-map-link">
                                 <i class="fas fa-map-marked-alt"></i> Get Directions
@@ -745,18 +797,35 @@ $conn->close();
                 </div>
                 <?php endif; ?>
                 
+                <!-- Embedded Map -->
+                <?php if ($has_valid_map && !empty($embed_url)): ?>
+                <div style="margin-bottom: 30px;">
+                    <h4 style="color: #e23020; font-size: 1rem; margin-bottom: 10px;"><i class="fas fa-map-marked-alt"></i> Location Map</h4>
+                    <div style="position: relative; padding-bottom: 50%; height: 0; overflow: hidden; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3);">
+                        <iframe 
+                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" 
+                            src="<?php echo $embed_url; ?>" 
+                            allowfullscreen="" 
+                            loading="lazy">
+                        </iframe>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <!-- Price Summary -->
                 <div class="price-summary">
                     <h4>PAYMENT SUMMARY</h4>
                     <div class="price-row">
                         <span>Ticket Price (<?php echo $seat_count; ?> seat(s))</span>
-                        <span class="amount">₱<?php echo number_format($booking['booking_fee'] ?? 0, 2); ?></span>
+                        <span class="amount">₱<?php echo number_format($booking['total_amount'], 2); ?></span>
                     </div>
                     <div class="price-row total">
                         <span>TOTAL AMOUNT PAID</span>
-                        <span class="amount">₱<?php echo number_format($booking['booking_fee'] ?? 0, 2); ?></span>
+                        <span class="amount">₱<?php echo number_format($booking['total_amount'], 2); ?></span>
                     </div>
                 </div>
                 
+                <!-- Terms Section -->
                 <div class="terms-section">
                     <h4>IMPORTANT INSTRUCTIONS</h4>
                     <ul>
@@ -769,12 +838,15 @@ $conn->close();
                         <?php if (!empty($booking['venue_name'])): ?>
                         <li><strong>Venue:</strong> <?php echo htmlspecialchars($booking['venue_name']); ?> - <?php echo htmlspecialchars($booking['venue_location']); ?></li>
                         <?php endif; ?>
+                        <?php if (!empty($booking['screen_name'])): ?>
+                        <li><strong>Screen:</strong> <?php echo htmlspecialchars($booking['screen_name']); ?> (Screen #<?php echo $booking['screen_number']; ?>)</li>
+                        <?php endif; ?>
                     </ul>
                 </div>
                 
                 <div class="receipt-footer">
                     <p>Thank you for choosing Movie Ticketing System!</p>
-                    <p style="margin-top: 10px;">Please present this QR code at the counter for verification</p>
+                    <p style="margin-top: 8px;">Please present this QR code at the counter for verification</p>
                     <p style="margin-top: 5px; font-style: italic;">Enjoy the show! 🎬</p>
                 </div>
             </div>
@@ -797,7 +869,7 @@ $conn->close();
     </div>
     
     <script>
-        // Generate QR code using JavaScript (no server required!)
+        // Generate QR code using JavaScript
         const qrText = '<?php echo $qr_text; ?>';
         
         // Create QR code
@@ -824,6 +896,7 @@ $conn->close();
             }
         }
         
+        // Copy booking reference
         function copyBookingReference() {
             const reference = document.getElementById('bookingReference').innerText;
             navigator.clipboard.writeText(reference).then(() => {
@@ -833,9 +906,14 @@ $conn->close();
             });
         }
         
+        // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 window.close();
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+                e.preventDefault();
+                window.print();
             }
         });
     </script>

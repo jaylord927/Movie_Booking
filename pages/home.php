@@ -6,11 +6,20 @@ require_once $root_dir . '/partials/header.php';
 
 $conn = get_db_connection();
 
+// Get filter from URL
 $filter = isset($_GET['filter']) ? $_GET['filter'] : 'now-showing';
 
-$movies_result = $conn->query("SELECT m.* FROM movies m WHERE m.is_active = 1 ORDER BY m.created_at DESC");
+// Get all active movies
+$movies_result = $conn->query("
+    SELECT DISTINCT m.* 
+    FROM movies m 
+    WHERE m.is_active = 1 
+    ORDER BY m.created_at DESC
+");
+
 $all_movies = [];
 $movies_with_posters = [];
+
 if ($movies_result) {
     while ($row = $movies_result->fetch_assoc()) {
         $all_movies[] = $row;
@@ -20,11 +29,20 @@ if ($movies_result) {
     }
 }
 
+// Separate movies into Now Showing and Coming Soon
 $now_showing = [];
 $coming_soon = [];
 
 foreach ($all_movies as $movie) {
-    $schedule_check = $conn->prepare("SELECT id FROM movie_schedules WHERE movie_id = ? AND is_active = 1 AND show_date >= CURDATE() LIMIT 1");
+    // Check if movie has any active schedule (using schedules table only - no available_seats column)
+    $schedule_check = $conn->prepare("
+        SELECT s.id 
+        FROM schedules s
+        WHERE s.movie_id = ? 
+        AND s.is_active = 1 
+        AND s.show_date >= CURDATE()
+        LIMIT 1
+    ");
     $schedule_check->bind_param("i", $movie['id']);
     $schedule_check->execute();
     $schedule_result = $schedule_check->get_result();
@@ -37,6 +55,7 @@ foreach ($all_movies as $movie) {
     $schedule_check->close();
 }
 
+// Determine which movies to display based on filter
 if ($filter === 'now-showing') {
     $display_movies = $now_showing;
     $display_title = "Now Showing";
@@ -47,6 +66,41 @@ if ($filter === 'now-showing') {
     $display_message = "Upcoming movies - stay tuned for showtimes";
 }
 
+// Get movie IDs for display
+$display_movie_ids = array_column($display_movies, 'id');
+
+// Fetch schedules for now showing movies (NO available_seats column - just check if schedule exists)
+$schedules = [];
+if ($filter === 'now-showing' && !empty($display_movie_ids)) {
+    $placeholders = implode(',', array_fill(0, count($display_movie_ids), '?'));
+    $schedule_sql = "
+        SELECT s.*, sc.screen_name, sc.screen_number, v.venue_name, v.venue_location
+        FROM schedules s
+        JOIN screens sc ON s.screen_id = sc.id
+        JOIN venues v ON sc.venue_id = v.id
+        WHERE s.movie_id IN ($placeholders) 
+        AND s.is_active = 1 
+        AND s.show_date >= CURDATE()
+        ORDER BY s.show_date, s.showtime
+        LIMIT 20
+    ";
+    
+    $schedule_stmt = $conn->prepare($schedule_sql);
+    $types = str_repeat('i', count($display_movie_ids));
+    $schedule_stmt->bind_param($types, ...$display_movie_ids);
+    $schedule_stmt->execute();
+    $schedules_result = $schedule_stmt->get_result();
+    
+    while ($row = $schedules_result->fetch_assoc()) {
+        if (!isset($schedules[$row['movie_id']])) {
+            $schedules[$row['movie_id']] = [];
+        }
+        $schedules[$row['movie_id']][] = $row;
+    }
+    $schedule_stmt->close();
+}
+
+// Get total counts
 $total_movies = count($display_movies);
 $movies_to_show = [];
 if ($total_movies <= 5) {
@@ -61,6 +115,7 @@ $conn->close();
 ?>
 
 <div class="main-container">
+    <!-- Slider Section -->
     <?php if (!empty($movies_with_posters)): ?>
     <div class="slider-container">
         <div class="slider" id="movieSlider">
@@ -101,6 +156,7 @@ $conn->close();
     </div>
     <?php endif; ?>
 
+    <!-- Filter Section -->
     <div class="filter-section">
         <a href="?filter=now-showing" class="filter-btn <?php echo $filter === 'now-showing' ? 'active' : ''; ?>">
             <i class="fas fa-play-circle"></i> Now Showing
@@ -113,6 +169,7 @@ $conn->close();
         </a>
     </div>
 
+    <!-- Movies Section -->
     <div class="movies-section">
         <div class="section-header">
             <div>
@@ -167,6 +224,11 @@ $conn->close();
                             <i class="fas fa-tag"></i> <?php echo explode(',', $movie['genre'])[0]; ?>
                         </span>
                         <?php endif; ?>
+                        <?php if ($filter === 'coming-soon'): ?>
+                        <span class="coming-soon-badge">
+                            <i class="fas fa-hourglass-half"></i> Coming Soon
+                        </span>
+                        <?php endif; ?>
                     </div>
                     
                     <div class="movie-content">
@@ -188,6 +250,19 @@ $conn->close();
                         <?php if ($movie['description']): ?>
                         <div class="movie-description">
                             <p><?php echo substr(htmlspecialchars($movie['description']), 0, 100); ?><?php if (strlen($movie['description']) > 100): ?>...<?php endif; ?></p>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if ($filter === 'now-showing' && isset($schedules[$movie['id']]) && !empty($schedules[$movie['id']])): ?>
+                        <div class="showtime-preview">
+                            <i class="fas fa-clock"></i> 
+                            <?php 
+                            $first_schedule = $schedules[$movie['id']][0];
+                            echo date('M d', strtotime($first_schedule['show_date'])) . ' • ' . date('h:i A', strtotime($first_schedule['showtime']));
+                            ?>
+                            <?php if (count($schedules[$movie['id']]) > 1): ?>
+                            <span class="more-showtimes">+<?php echo count($schedules[$movie['id']]) - 1; ?> more</span>
+                            <?php endif; ?>
                         </div>
                         <?php endif; ?>
                         
@@ -214,12 +289,6 @@ $conn->close();
                                 </a>
                             <?php endif; ?>
                         </div>
-                        
-                        <?php if ($filter === 'coming-soon'): ?>
-                        <div class="coming-soon-tag">
-                            <i class="fas fa-hourglass-half"></i> Coming Soon
-                        </div>
-                        <?php endif; ?>
                     </div>
                 </div>
                 <?php endforeach; ?>
@@ -236,6 +305,7 @@ $conn->close();
         <?php endif; ?>
     </div>
 
+    <!-- Features Section -->
     <div class="features-section">
         <h2>Why Choose Us?</h2>
         <div class="features-grid">
@@ -298,6 +368,7 @@ $conn->close();
         </div>
     </div>
 
+    <!-- CTA Section for Guests -->
     <?php if (!isset($_SESSION['user_id'])): ?>
     <div class="cta-section">
         <h2>Ready to Book Your Movie?</h2>
@@ -317,6 +388,7 @@ $conn->close();
 <style>
 .main-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
 
+/* Slider Styles */
 .slider-container {
     position: relative;
     width: 100%;
@@ -462,183 +534,467 @@ $conn->close();
     background: white;
 }
 
+/* Filter Section */
 .filter-section {
-    display: flex; justify-content: center; gap: 15px; margin-bottom: 40px;
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 40px;
+    flex-wrap: wrap;
 }
+
 .filter-btn {
-    padding: 12px 30px; border-radius: 30px; text-decoration: none; font-weight: 700;
-    font-size: 1.1rem; transition: all 0.3s ease; display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(255, 255, 255, 0.1); color: white; border: 2px solid rgba(226, 48, 32, 0.3);
+    padding: 12px 30px;
+    border-radius: 30px;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 1.1rem;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 2px solid rgba(226, 48, 32, 0.3);
 }
+
 .filter-btn:hover {
-    background: rgba(226, 48, 32, 0.2); border-color: var(--primary-red); transform: translateY(-2px);
+    background: rgba(226, 48, 32, 0.2);
+    border-color: var(--primary-red);
+    transform: translateY(-2px);
 }
+
 .filter-btn.active {
     background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%);
-    border-color: transparent; box-shadow: 0 4px 15px rgba(226, 48, 32, 0.3);
+    border-color: transparent;
+    box-shadow: 0 4px 15px rgba(226, 48, 32, 0.3);
 }
 
+/* Movies Section */
 .movies-section { margin-bottom: 60px; }
+
 .section-header { 
-    display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: flex-end; 
+    margin-bottom: 30px; 
 }
-.section-header h2 { color: white; font-size: 2rem; font-weight: 800; margin-bottom: 5px; }
-.section-subtitle { color: var(--pale-red); font-size: 1rem; }
+
+.section-header h2 { 
+    color: white; 
+    font-size: 2rem; 
+    font-weight: 800; 
+    margin-bottom: 5px; 
+}
+
+.section-subtitle { 
+    color: var(--pale-red); 
+    font-size: 1rem; 
+}
 
 .movies-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 30px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 30px;
 }
 
 .movie-card {
     background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%);
-    border-radius: 15px; overflow: hidden; transition: all 0.3s ease;
-    border: 1px solid rgba(226, 48, 32, 0.2); display: flex; flex-direction: column;
-    height: 100%; position: relative;
+    border-radius: 15px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(226, 48, 32, 0.2);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
 }
-.movie-card:hover { transform: translateY(-10px); box-shadow: 0 20px 40px rgba(226, 48, 32, 0.2); border-color: #e23020; }
 
-.movie-card img { width: 100%; height: 320px; object-fit: cover; }
-.movie-poster-placeholder {
-    width: 100%; height: 320px; background: linear-gradient(135deg, rgba(226, 48, 32, 0.1), rgba(193, 27, 24, 0.2));
-    display: flex; align-items: center; justify-content: center;
+.movie-card:hover { 
+    transform: translateY(-10px); 
+    box-shadow: 0 20px 40px rgba(226, 48, 32, 0.2); 
+    border-color: #e23020; 
 }
-.movie-poster-placeholder i { font-size: 3rem; color: rgba(255, 255, 255, 0.3); }
+
+.movie-card img { 
+    width: 100%; 
+    height: 320px; 
+    object-fit: cover; 
+}
+
+.movie-poster-placeholder {
+    width: 100%;
+    height: 320px;
+    background: linear-gradient(135deg, rgba(226, 48, 32, 0.1), rgba(193, 27, 24, 0.2));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.movie-poster-placeholder i { 
+    font-size: 3rem; 
+    color: rgba(255, 255, 255, 0.3); 
+}
 
 .movie-badges {
-    position: absolute; top: 15px; right: 15px; display: flex; flex-direction: column; gap: 8px;
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
+
 .rating-badge {
-    background: var(--primary-red); color: white; font-weight: 700; font-size: 0.8rem;
-    padding: 6px 12px; border-radius: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    text-align: center; min-width: 40px;
+    background: var(--primary-red);
+    color: white;
+    font-weight: 700;
+    font-size: 0.8rem;
+    padding: 6px 12px;
+    border-radius: 20px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    text-align: center;
+    min-width: 40px;
 }
+
 .genre-badge {
-    background: rgba(0,0,0,0.7); color: white; font-weight: 600; font-size: 0.75rem;
-    padding: 5px 10px; border-radius: 15px; display: flex; align-items: center; gap: 5px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    font-weight: 600;
+    font-size: 0.75rem;
+    padding: 5px 10px;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.coming-soon-badge {
+    background: rgba(241, 196, 15, 0.2);
+    color: #f1c40f;
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    border: 1px solid rgba(241, 196, 15, 0.3);
 }
 
 .movie-content {
-    padding: 25px; flex: 1; display: flex; flex-direction: column; position: relative;
+    padding: 25px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
+
 .movie-content h3 {
-    color: white; font-size: 1.3rem; font-weight: 800; margin-bottom: 15px;
-    line-height: 1.4; min-height: 3.2em; flex-shrink: 0; padding-right: 100px;
+    color: white;
+    font-size: 1.3rem;
+    font-weight: 800;
+    margin-bottom: 15px;
+    line-height: 1.4;
+    min-height: 3.2em;
 }
 
-.movie-info { margin-bottom: 15px; flex-shrink: 0; }
+.movie-info { 
+    margin-bottom: 15px; 
+}
+
 .info-item {
-    display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.8);
-    font-size: 0.9rem; margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: rgba(255,255,255,0.8);
+    font-size: 0.9rem;
+    margin-bottom: 8px;
 }
 
-.movie-description { flex: 1; margin-bottom: 20px; }
+.movie-description { 
+    flex: 1; 
+    margin-bottom: 15px; 
+}
+
 .movie-description p {
-    color: rgba(255,255,255,0.7); font-size: 0.95rem; line-height: 1.6;
-    max-height: 4.5em; overflow: hidden; position: relative;
+    color: rgba(255,255,255,0.7);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.showtime-preview {
+    background: rgba(52, 152, 219, 0.2);
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    font-size: 0.8rem;
+    color: #3498db;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.more-showtimes {
+    background: rgba(52, 152, 219, 0.3);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
 }
 
 .movie-buttons {
-    display: flex; gap: 5px; margin-top: auto; flex-shrink: 0;
+    display: flex;
+    gap: 5px;
+    margin-top: auto;
 }
+
 .movie-buttons .btn {
-    padding: 8px; text-align: center; font-size: 0.8rem; height: 36px;
-    display: flex; align-items: center; justify-content: center; flex: 1;
+    padding: 8px;
+    text-align: center;
+    font-size: 0.8rem;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
 }
+
 .movie-buttons .btn-trailer {
-    background: rgba(255, 0, 0, 0.2); color: #ff0000; border: 2px solid rgba(255, 0, 0, 0.3); max-width: 45px;
+    background: rgba(255, 0, 0, 0.2);
+    color: #ff0000;
+    border: 2px solid rgba(255, 0, 0, 0.3);
+    max-width: 45px;
 }
+
 .movie-buttons .btn-trailer:hover {
-    background: rgba(255, 0, 0, 0.3); border-color: #ff0000;
+    background: rgba(255, 0, 0, 0.3);
+    border-color: #ff0000;
 }
 
-.coming-soon-tag {
-    position: absolute; top: 25px; right: 25px; background: rgba(241, 196, 15, 0.2);
-    color: #f1c40f; padding: 5px 12px; border-radius: 20px; font-size: 0.75rem;
-    font-weight: 700; display: flex; align-items: center; gap: 5px; border: 1px solid rgba(241, 196, 15, 0.3);
-}
-
+/* Empty State */
 .empty-movies {
-    text-align: center; padding: 50px; background: rgba(226, 48, 32, 0.05);
-    border-radius: 15px; border: 2px dashed rgba(226, 48, 32, 0.3);
+    text-align: center;
+    padding: 60px;
+    background: rgba(226, 48, 32, 0.05);
+    border-radius: 15px;
+    border: 2px dashed rgba(226, 48, 32, 0.3);
 }
-.empty-movies i { color: var(--primary-red); margin-bottom: 20px; opacity: 0.8; }
-.empty-movies h3 { color: white; margin-bottom: 10px; font-size: 1.5rem; }
-.empty-movies p { color: var(--pale-red); max-width: 400px; margin: 0 auto; }
+
+.empty-movies i { 
+    color: var(--primary-red); 
+    margin-bottom: 20px; 
+    opacity: 0.8; 
+}
+
+.empty-movies h3 { 
+    color: white; 
+    margin-bottom: 10px; 
+    font-size: 1.5rem; 
+}
+
+.empty-movies p { 
+    color: var(--pale-red); 
+    max-width: 400px; 
+    margin: 0 auto; 
+}
 
 .movies-count {
-    text-align: center; margin-top: 30px; padding: 15px; background: rgba(226, 48, 32, 0.05);
-    border-radius: 10px; border: 1px solid rgba(226, 48, 32, 0.2);
-}
-.movies-count p { color: var(--pale-red); margin-bottom: 5px; }
-.movies-count a {
-    color: var(--light-red); text-decoration: none; font-weight: 600;
-    display: inline-flex; align-items: center; gap: 8px;
+    text-align: center;
+    margin-top: 30px;
+    padding: 15px;
+    background: rgba(226, 48, 32, 0.05);
+    border-radius: 10px;
+    border: 1px solid rgba(226, 48, 32, 0.2);
 }
 
-.features-section { margin-top: 60px; text-align: center; }
-.features-section h2 { color: white; margin-bottom: 40px; font-size: 2rem; font-weight: 800; }
-.features-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; margin-top: 30px;
+.movies-count p { 
+    color: var(--pale-red); 
+    margin-bottom: 5px; 
 }
+
+.movies-count a {
+    color: var(--light-red);
+    text-decoration: none;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Features Section */
+.features-section { 
+    margin-top: 60px; 
+    text-align: center; 
+}
+
+.features-section h2 { 
+    color: white; 
+    margin-bottom: 40px; 
+    font-size: 2rem; 
+    font-weight: 800; 
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 30px;
+    margin-top: 30px;
+}
+
 .feature-card {
     background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%);
-    padding: 30px; border-radius: 15px; border: 1px solid rgba(226, 48, 32, 0.2);
-    transition: all 0.3s ease; display: flex; flex-direction: column; height: 100%;
+    padding: 30px;
+    border-radius: 15px;
+    border: 1px solid rgba(226, 48, 32, 0.2);
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
-.feature-card:hover { transform: translateY(-5px); border-color: var(--primary-red); }
-.feature-icon { font-size: 2.5rem; color: var(--primary-red); margin-bottom: 15px; }
-.feature-card h3 { color: white; margin-bottom: 10px; font-size: 1.3rem; }
-.feature-card p { color: var(--pale-red); line-height: 1.6; margin-bottom: 15px; }
+
+.feature-card:hover { 
+    transform: translateY(-5px); 
+    border-color: var(--primary-red); 
+}
+
+.feature-icon { 
+    font-size: 2.5rem; 
+    color: var(--primary-red); 
+    margin-bottom: 15px; 
+}
+
+.feature-card h3 { 
+    color: white; 
+    margin-bottom: 10px; 
+    font-size: 1.3rem; 
+}
+
+.feature-card p { 
+    color: var(--pale-red); 
+    line-height: 1.6; 
+    margin-bottom: 15px; 
+}
+
 .feature-info {
-    background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px;
-    color: rgba(255, 255, 255, 0.8); font-size: 0.9rem; line-height: 1.5;
-    margin-bottom: 20px; border-left: 3px solid var(--primary-red); text-align: left;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 12px;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin-bottom: 20px;
+    border-left: 3px solid var(--primary-red);
+    text-align: left;
 }
-.feature-info i { color: var(--primary-red); margin-right: 5px; }
+
+.feature-info i { 
+    color: var(--primary-red); 
+    margin-right: 5px; 
+}
+
 .feature-link {
-    color: var(--light-red); text-decoration: none; font-weight: 600;
-    display: inline-flex; align-items: center; gap: 5px; margin-top: auto;
-    padding: 10px 0; border-top: 1px solid rgba(226, 48, 32, 0.2);
+    color: var(--light-red);
+    text-decoration: none;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: auto;
+    padding: 10px 0;
+    border-top: 1px solid rgba(226, 48, 32, 0.2);
 }
-.feature-link:hover { color: white; gap: 10px; }
 
+.feature-link:hover { 
+    color: white; 
+    gap: 10px; 
+}
+
+/* CTA Section */
 .cta-section {
-    text-align: center; margin-top: 80px; padding: 50px;
+    text-align: center;
+    margin-top: 80px;
+    padding: 50px;
     background: linear-gradient(135deg, rgba(226, 48, 32, 0.1), rgba(193, 27, 24, 0.2));
-    border-radius: 20px; border: 2px solid rgba(226, 48, 32, 0.3);
-}
-.cta-section h2 { color: white; margin-bottom: 20px; font-size: 2.2rem; font-weight: 800; }
-.cta-section p { color: var(--pale-red); font-size: 1.1rem; margin-bottom: 30px; max-width: 600px; margin-left: auto; margin-right: auto; }
-.cta-buttons { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
-
-.btn {
-    padding: 12px 25px; text-decoration: none; border-radius: 10px; font-weight: 600;
-    transition: all 0.3s ease; display: inline-flex; align-items: center;
-    gap: 8px; border: none; cursor: pointer; font-size: 1rem;
-}
-.btn-primary {
-    background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%);
-    color: white; box-shadow: 0 4px 15px rgba(226, 48, 32, 0.3);
-}
-.btn-primary:hover {
-    background: linear-gradient(135deg, var(--dark-red) 0%, var(--deep-red) 100%);
-    transform: translateY(-3px); box-shadow: 0 8px 25px rgba(226, 48, 32, 0.4);
-}
-.btn-secondary {
-    background: rgba(255, 255, 255, 0.1); color: white;
+    border-radius: 20px;
     border: 2px solid rgba(226, 48, 32, 0.3);
 }
+
+.cta-section h2 { 
+    color: white; 
+    margin-bottom: 20px; 
+    font-size: 2.2rem; 
+    font-weight: 800; 
+}
+
+.cta-section p { 
+    color: var(--pale-red); 
+    font-size: 1.1rem; 
+    margin-bottom: 30px; 
+    max-width: 600px; 
+    margin-left: auto; 
+    margin-right: auto; 
+}
+
+.cta-buttons { 
+    display: flex; 
+    gap: 15px; 
+    justify-content: center; 
+    flex-wrap: wrap; 
+}
+
+/* Buttons */
+.btn {
+    padding: 12px 25px;
+    text-decoration: none;
+    border-radius: 10px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%);
+    color: white;
+    box-shadow: 0 4px 15px rgba(226, 48, 32, 0.3);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, var(--dark-red) 0%, var(--deep-red) 100%);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(226, 48, 32, 0.4);
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 2px solid rgba(226, 48, 32, 0.3);
+}
+
 .btn-secondary:hover {
-    background: rgba(226, 48, 32, 0.2); border-color: var(--primary-red);
+    background: rgba(226, 48, 32, 0.2);
+    border-color: var(--primary-red);
     transform: translateY(-3px);
 }
 
 :root {
-    --primary-red: #e23020; --dark-red: #c11b18; --deep-red: #a80f0f;
-    --light-red: #ff6b6b; --pale-red: #ff9999; --bg-dark: #0f0f23;
-    --bg-darker: #1a1a2e; --bg-card: #3a0b07; --bg-card-light: #6b140e;
+    --primary-red: #e23020;
+    --dark-red: #c11b18;
+    --deep-red: #a80f0f;
+    --light-red: #ff6b6b;
+    --pale-red: #ff9999;
+    --bg-dark: #0f0f23;
+    --bg-darker: #1a1a2e;
+    --bg-card: #3a0b07;
+    --bg-card-light: #6b140e;
 }
 
+/* Responsive */
 @media (max-width: 768px) {
     .slider-container { height: 350px; }
     .slide-overlay { padding: 20px; }
@@ -647,13 +1003,13 @@ $conn->close();
     .features-grid { grid-template-columns: 1fr; }
     .filter-section { flex-direction: column; align-items: center; }
     .filter-btn { width: 200px; justify-content: center; }
+    .section-header { flex-direction: column; gap: 15px; align-items: flex-start; }
 }
 
 @media (max-width: 576px) {
     .slider-container { height: 250px; }
     .slider-btn { width: 35px; height: 35px; font-size: 1rem; }
     .movies-grid { grid-template-columns: 1fr; }
-    .section-header { flex-direction: column; gap: 15px; align-items: flex-start; }
     .movie-buttons .btn { padding: 6px; font-size: 0.75rem; }
 }
 </style>
@@ -674,11 +1030,13 @@ function showSlide(index) {
     }
     
     const slider = document.getElementById('movieSlider');
-    slider.style.transform = `translateX(-${currentSlide * 100}%)`;
+    if (slider) {
+        slider.style.transform = `translateX(-${currentSlide * 100}%)`;
+    }
     
     const dots = document.querySelectorAll('.dot');
     dots.forEach((dot, i) => {
-        dot.classList.toggle('active', i === currentSlide % (totalSlides / 3));
+        dot.classList.toggle('active', i === currentSlide % (Math.max(1, Math.floor(totalSlides / 3))));
     });
 }
 
@@ -689,7 +1047,10 @@ function moveSlide(direction) {
 
 function createDots() {
     const dotsContainer = document.getElementById('sliderDots');
+    if (!dotsContainer || totalSlides === 0) return;
+    
     const uniqueSlides = Math.min(6, totalSlides);
+    dotsContainer.innerHTML = '';
     for (let i = 0; i < uniqueSlides; i++) {
         const dot = document.createElement('span');
         dot.classList.add('dot');
@@ -703,9 +1064,10 @@ function createDots() {
 }
 
 function startAutoSlide() {
+    if (totalSlides === 0) return;
     autoSlideInterval = setInterval(() => {
         moveSlide(1);
-    }, 3000);
+    }, 5000);
 }
 
 function resetAutoSlide() {

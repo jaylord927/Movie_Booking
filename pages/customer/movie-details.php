@@ -12,20 +12,12 @@ if ($movie_id <= 0) {
     exit();
 }
 
-// ============================================
-// UPDATED QUERY: Get movie with venue information from venues table
-// ============================================
+// Get movie details
 $stmt = $conn->prepare("
     SELECT m.*, 
-           v.id as venue_id,
-           v.venue_name, 
-           v.venue_location, 
-           v.google_maps_link,
-           v.venue_photo_path,
            a.u_name as added_by_name,
            u.u_name as updated_by_name
     FROM movies m
-    LEFT JOIN venues v ON m.venue_id = v.id
     LEFT JOIN users a ON m.added_by = a.u_id
     LEFT JOIN users u ON m.updated_by = u.u_id
     WHERE m.id = ? AND m.is_active = 1
@@ -43,17 +35,67 @@ if ($result->num_rows === 0) {
 $movie = $result->fetch_assoc();
 $stmt->close();
 
-// ============================================
-// Get schedules for this movie
-// ============================================
+// Get screens where this movie is playing with prices for each seat type
+// Pivot the seat_type prices into columns
+$screens_stmt = $conn->prepare("
+    SELECT 
+        sc.id as screen_id,
+        sc.screen_name,
+        sc.screen_number,
+        sc.capacity,
+        v.id as venue_id,
+        v.venue_name,
+        v.venue_location,
+        v.google_maps_link,
+        v.venue_photo_path,
+        v.contact_number,
+        v.operating_hours,
+        MAX(CASE WHEN st.name = 'Standard' THEN msp.price ELSE NULL END) as standard_price,
+        MAX(CASE WHEN st.name = 'Premium' THEN msp.price ELSE NULL END) as premium_price,
+        MAX(CASE WHEN st.name = 'Sweet Spot' THEN msp.price ELSE NULL END) as sweet_spot_price
+    FROM movie_screen_prices msp
+    JOIN screens sc ON msp.screen_id = sc.id
+    JOIN venues v ON sc.venue_id = v.id
+    JOIN seat_types st ON msp.seat_type_id = st.id
+    WHERE msp.movie_id = ? AND msp.is_active = 1
+    GROUP BY sc.id, sc.screen_name, sc.screen_number, sc.capacity, v.id, v.venue_name, v.venue_location, v.google_maps_link, v.venue_photo_path, v.contact_number, v.operating_hours
+    ORDER BY v.venue_name, sc.screen_number
+");
+$screens_stmt->bind_param("i", $movie_id);
+$screens_stmt->execute();
+$screens_result = $screens_stmt->get_result();
+$screens = [];
+while ($row = $screens_result->fetch_assoc()) {
+    $screens[] = $row;
+}
+$screens_stmt->close();
+
+// Get schedules for this movie (upcoming showtimes)
 $schedules_stmt = $conn->prepare("
-    SELECT * FROM movie_schedules 
-    WHERE movie_id = ? 
-    AND is_active = 1 
-    AND show_date >= CURDATE()
-    AND available_seats > 0
-    ORDER BY show_date, showtime
-    LIMIT 5
+    SELECT 
+        s.id as schedule_id,
+        s.show_date,
+        s.showtime,
+        s.base_price,
+        sc.id as screen_id,
+        sc.screen_name,
+        sc.screen_number,
+        v.id as venue_id,
+        v.venue_name,
+        v.venue_location,
+        v.google_maps_link,
+        COUNT(sa.id) as total_seats,
+        COUNT(CASE WHEN sa.status = 'available' THEN 1 END) as available_seats
+    FROM schedules s
+    JOIN screens sc ON s.screen_id = sc.id
+    JOIN venues v ON sc.venue_id = v.id
+    LEFT JOIN seat_availability sa ON s.id = sa.schedule_id
+    WHERE s.movie_id = ? 
+    AND s.is_active = 1 
+    AND s.show_date >= CURDATE()
+    GROUP BY s.id, s.show_date, s.showtime, s.base_price, sc.id, sc.screen_name, sc.screen_number, v.id, v.venue_name, v.venue_location, v.google_maps_link
+    ORDER BY s.show_date, s.showtime
+    LIMIT 10
 ");
 $schedules_stmt->bind_param("i", $movie_id);
 $schedules_stmt->execute();
@@ -171,7 +213,7 @@ require_once $root_dir . '/partials/header.php';
             <?php if ($youtube_id): ?>
                 <iframe style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;" src="https://www.youtube.com/embed/<?php echo $youtube_id; ?>" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
             <?php else: ?>
-                <a href="<?php echo $movie['trailer_url']; ?>" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; text-decoration: none;">
+                <a href="<?php echo $movie['trailer_url']; ?>" target="_blank" class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; text-decoration: none;">
                     <i class="fas fa-play-circle" style="font-size: 4rem; color: var(--primary-red);"></i>
                 </a>
             <?php endif; ?>
@@ -179,149 +221,61 @@ require_once $root_dir . '/partials/header.php';
     </div>
     <?php endif; ?>
 
-    <!-- ============================================
-         VENUE INFORMATION SECTION (UPDATED)
-         Now displays venue info from venues table
-    ============================================= -->
-    <?php if (!empty($movie['venue_name']) || !empty($movie['venue_location']) || !empty($movie['google_maps_link']) || !empty($movie['venue_photo_path'])): ?>
+    <!-- Venues Section (Screens where movie is playing) -->
+    <?php if (!empty($screens)): ?>
     <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 20px; padding: 30px; border: 1px solid rgba(226, 48, 32, 0.3); margin-bottom: 40px;">
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-map-marker-alt" style="color: #e74c3c;"></i> Venue Information
+            <i class="fas fa-map-marker-alt" style="color: #e74c3c;"></i> Available Venues
         </h2>
         
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start;">
-            <!-- Left Column: Location Details and Map Button -->
-            <div>
-                <?php if (!empty($movie['venue_name'])): ?>
-                <div style="margin-bottom: 20px;">
-                    <div style="color: var(--pale-red); font-size: 0.9rem; margin-bottom: 5px;">Venue Name</div>
-                    <div style="color: white; font-size: 1.3rem; font-weight: 700;">
-                        <?php echo htmlspecialchars($movie['venue_name']); ?>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px;">
+            <?php foreach ($screens as $screen): ?>
+            <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; border: 1px solid rgba(226, 48, 32, 0.2);">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
+                    <div style="width: 40px; height: 40px; background: linear-gradient(135deg, var(--primary-red) 0%, var(--dark-red) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-building" style="color: white; font-size: 1.2rem;"></i>
+                    </div>
+                    <div>
+                        <h3 style="color: white; font-size: 1.2rem; font-weight: 700;"><?php echo htmlspecialchars($screen['venue_name']); ?></h3>
+                        <p style="color: var(--pale-red); font-size: 0.8rem;"><?php echo htmlspecialchars($screen['screen_name']); ?> (Screen #<?php echo $screen['screen_number']; ?>)</p>
                     </div>
                 </div>
+                
+                <?php if (!empty($screen['venue_location'])): ?>
+                <p style="color: rgba(255,255,255,0.7); font-size: 0.85rem; margin-bottom: 10px;">
+                    <i class="fas fa-map-pin"></i> <?php echo htmlspecialchars($screen['venue_location']); ?>
+                </p>
                 <?php endif; ?>
                 
-                <?php if (!empty($movie['venue_location'])): ?>
-                <div style="margin-bottom: 20px;">
-                    <div style="color: var(--pale-red); font-size: 0.9rem; margin-bottom: 5px;">Location</div>
-                    <div style="color: white; font-size: 1.1rem;">
-                        <?php echo htmlspecialchars($movie['venue_location']); ?>
+                <!-- Price display -->
+                <div style="background: rgba(0,0,0,0.2); border-radius: 10px; padding: 12px; margin: 10px 0;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span style="color: rgba(255,255,255,0.6);"><i class="fas fa-chair"></i> Standard:</span>
+                        <span style="color: #3498db; font-weight: 600;">₱<?php echo number_format($screen['standard_price'] ?? 350, 2); ?></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span style="color: rgba(255,255,255,0.6);"><i class="fas fa-crown"></i> Premium:</span>
+                        <span style="color: #FFD700; font-weight: 600;">₱<?php echo number_format($screen['premium_price'] ?? 450, 2); ?></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: rgba(255,255,255,0.6);"><i class="fas fa-star"></i> Sweet Spot:</span>
+                        <span style="color: #e74c3c; font-weight: 600;">₱<?php echo number_format($screen['sweet_spot_price'] ?? 550, 2); ?></span>
                     </div>
                 </div>
-                <?php endif; ?>
                 
-                <?php if (!empty($movie['google_maps_link'])): ?>
-                <a href="<?php echo $movie['google_maps_link']; ?>" target="_blank" 
-                   style="display: inline-flex; align-items: center; gap: 10px; background: #e74c3c; color: white; padding: 15px 30px; border-radius: 10px; text-decoration: none; font-weight: 600; margin-top: 15px; transition: all 0.3s ease;"
-                   onmouseover="this.style.background='#c0392b'; this.style.transform='translateY(-2px)';"
-                   onmouseout="this.style.background='#e74c3c'; this.style.transform='translateY(0)';">
-                    <i class="fas fa-map-marked-alt"></i> Open in Google Maps
-                    <i class="fas fa-external-link-alt" style="font-size: 0.8rem;"></i>
-                </a>
-                <?php endif; ?>
-            </div>
-            
-            <!-- Right Column: Venue Photo -->
-            <div>
-                <?php if (!empty($movie['venue_photo_path'])): ?>
-                <div style="background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;">
-                    <div style="color: white; font-weight: 600; margin-bottom: 15px;">
-                        <i class="fas fa-camera"></i> Venue Photo
+                <div style="display: flex; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+                    <div>
+                        <span style="color: #3498db; font-size: 0.8rem;">Capacity:</span>
+                        <span style="color: white; font-weight: 600;"><?php echo number_format($screen['capacity']); ?> seats</span>
                     </div>
-                    <div style="text-align: center; cursor: pointer;" onclick="openFullImage('<?php echo SITE_URL . $movie['venue_photo_path']; ?>', '<?php echo htmlspecialchars($movie['venue_name'] ?? 'Venue'); ?>')">
-                        <img src="<?php echo SITE_URL . $movie['venue_photo_path']; ?>" 
-                             alt="<?php echo htmlspecialchars($movie['venue_name'] ?? 'Venue'); ?> Photo"
-                             style="max-width: 100%; max-height: 250px; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3); object-fit: cover; transition: transform 0.3s ease; cursor: pointer;"
-                             onmouseover="this.style.transform='scale(1.02)';"
-                             onmouseout="this.style.transform='scale(1)';">
-                    </div>
-                    <div style="margin-top: 10px; text-align: center;">
-                        <span style="color: var(--pale-red); font-size: 0.75rem; cursor: pointer;" onclick="openFullImage('<?php echo SITE_URL . $movie['venue_photo_path']; ?>', '<?php echo htmlspecialchars($movie['venue_name'] ?? 'Venue'); ?>')">
-                            <i class="fas fa-search-plus"></i> Click photo to view full size
-                        </span>
-                    </div>
+                    <?php if (!empty($screen['google_maps_link'])): ?>
+                    <a href="<?php echo $screen['google_maps_link']; ?>" target="_blank" style="color: #3498db; font-size: 0.8rem; text-decoration: none;">
+                        <i class="fas fa-map-marked-alt"></i> Map
+                    </a>
+                    <?php endif; ?>
                 </div>
-                <?php else: ?>
-                <div style="background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px; text-align: center;">
-                    <i class="fas fa-camera" style="font-size: 3rem; color: rgba(255,255,255,0.2); margin-bottom: 10px;"></i>
-                    <p style="color: rgba(255,255,255,0.5);">No venue photo available</p>
-                </div>
-                <?php endif; ?>
             </div>
-        </div>
-
-        <!-- Embedded Map (if available) - Below both columns -->
-        <?php if (!empty($movie['google_maps_link'])): 
-            // Extract coordinates from Google Maps link for embedded map
-            $embed_url = '';
-            if (preg_match('/q=([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
-                $lat = $matches[1];
-                $lng = $matches[2];
-                $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
-            } elseif (preg_match('/@([0-9.-]+),([0-9.-]+)/', $movie['google_maps_link'], $matches)) {
-                $lat = $matches[1];
-                $lng = $matches[2];
-                $embed_url = "https://maps.google.com/maps?q={$lat},{$lng}&z=15&output=embed";
-            } else {
-                $embed_url = "https://maps.google.com/maps?q=" . urlencode($movie['venue_location'] ?? $movie['venue_name'] ?? '') . "&z=15&output=embed";
-            }
-        ?>
-        <div style="margin-top: 30px; background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;">
-            <div style="color: white; font-weight: 600; margin-bottom: 15px;">📍 Location Map</div>
-            <div style="position: relative; padding-bottom: 50%; height: 0; overflow: hidden; border-radius: 10px; border: 2px solid rgba(226, 48, 32, 0.3);">
-                <iframe 
-                    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" 
-                    src="<?php echo $embed_url; ?>" 
-                    allowfullscreen="" 
-                    loading="lazy">
-                </iframe>
-            </div>
-            <div style="color: var(--pale-red); font-size: 0.85rem; margin-top: 10px; text-align: center;">
-                <i class="fas fa-info-circle"></i> Exact location shown on map
-            </div>
-        </div>
-        <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
-    <!-- Price Information Section -->
-    <?php if (isset($movie['standard_price']) || isset($movie['premium_price']) || isset($movie['sweet_spot_price'])): ?>
-    <div style="background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-light) 100%); border-radius: 20px; padding: 30px; border: 1px solid rgba(226, 48, 32, 0.3); margin-bottom: 40px;">
-        <h2 style="color: white; font-size: 1.8rem; margin-bottom: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-tags" style="color: #f39c12;"></i> Ticket Prices
-        </h2>
-        
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
-            <div style="background: rgba(52, 152, 219, 0.2); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid rgba(52, 152, 219, 0.3);">
-                <div style="width: 50px; height: 50px; background: #3498db; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
-                    <i class="fas fa-chair" style="color: white; font-size: 1.5rem;"></i>
-                </div>
-                <h3 style="color: white; font-size: 1.2rem; margin-bottom: 10px; font-weight: 700;">Standard</h3>
-                <div style="color: #3498db; font-size: 1.8rem; font-weight: 800;">₱<?php echo number_format($movie['standard_price'] ?? 350, 2); ?></div>
-                <div style="color: var(--pale-red); font-size: 0.9rem; margin-top: 10px;">per seat</div>
-            </div>
-            
-            <div style="background: rgba(255, 215, 0, 0.2); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid rgba(255, 215, 0, 0.3);">
-                <div style="width: 50px; height: 50px; background: #FFD700; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
-                    <i class="fas fa-crown" style="color: #333; font-size: 1.5rem;"></i>
-                </div>
-                <h3 style="color: white; font-size: 1.2rem; margin-bottom: 10px; font-weight: 700;">Premium</h3>
-                <div style="color: #FFD700; font-size: 1.8rem; font-weight: 800;">₱<?php echo number_format($movie['premium_price'] ?? 450, 2); ?></div>
-                <div style="color: var(--pale-red); font-size: 0.9rem; margin-top: 10px;">per seat</div>
-            </div>
-            
-            <div style="background: rgba(231, 76, 60, 0.2); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid rgba(231, 76, 60, 0.3);">
-                <div style="width: 50px; height: 50px; background: #e74c3c; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
-                    <i class="fas fa-star" style="color: white; font-size: 1.5rem;"></i>
-                </div>
-                <h3 style="color: white; font-size: 1.2rem; margin-bottom: 10px; font-weight: 700;">Sweet Spot</h3>
-                <div style="color: #e74c3c; font-size: 1.8rem; font-weight: 800;">₱<?php echo number_format($movie['sweet_spot_price'] ?? 550, 2); ?></div>
-                <div style="color: var(--pale-red); font-size: 0.9rem; margin-top: 10px;">per seat</div>
-            </div>
-        </div>
-        
-        <div style="text-align: center; margin-top: 20px; color: var(--pale-red); font-size: 0.95rem;">
-            <i class="fas fa-info-circle"></i> Prices are per ticket and may vary by showtime
+            <?php endforeach; ?>
         </div>
     </div>
     <?php endif; ?>
@@ -346,12 +300,13 @@ require_once $root_dir . '/partials/header.php';
                 <p style="font-size: 0.9rem; margin-top: 10px;">Please check back later.</p>
             </div>
         <?php else: ?>
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
                 <?php foreach ($schedules as $schedule): 
                     $is_today = date('Y-m-d') == $schedule['show_date'];
                     $is_tomorrow = date('Y-m-d', strtotime('+1 day')) == $schedule['show_date'];
                     $show_date = date('D, M d', strtotime($schedule['show_date']));
                     $show_time = date('h:i A', strtotime($schedule['showtime']));
+                    $available_percentage = $schedule['total_seats'] > 0 ? ($schedule['available_seats'] / $schedule['total_seats']) * 100 : 0;
                     $seats_left_text = $schedule['available_seats'] <= 10 ? "{$schedule['available_seats']} seats left" : '';
                 ?>
                 <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; border: 1px solid rgba(226, 48, 32, 0.2); transition: all 0.3s ease;">
@@ -368,23 +323,32 @@ require_once $root_dir . '/partials/header.php';
                         <i class="far fa-calendar"></i> <?php echo $show_date; ?>
                     </div>
                     
-                    <div style="margin-bottom: 15px;">
+                    <div style="margin-bottom: 10px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span style="color: rgba(255,255,255,0.7);">Available Seats:</span>
+                            <span style="color: rgba(255,255,255,0.7);"><?php echo htmlspecialchars($schedule['venue_name']); ?> - <?php echo htmlspecialchars($schedule['screen_name']); ?></span>
                             <span style="color: <?php echo $schedule['available_seats'] < 10 ? '#ff6b6b' : '#2ecc71'; ?>; font-weight: 700;">
                                 <?php echo $schedule['available_seats']; ?>/<?php echo $schedule['total_seats']; ?>
-                                <?php if ($seats_left_text): ?>
-                                <span style="color: #ff6b6b; font-weight: 700;"> (<?php echo $seats_left_text; ?>)</span>
-                                <?php endif; ?>
                             </span>
                         </div>
                         <div style="background: rgba(255,255,255,0.1); height: 6px; border-radius: 3px; overflow: hidden;">
-                            <div style="background: <?php echo ($schedule['available_seats'] / $schedule['total_seats']) > 0.5 ? '#2ecc71' : (($schedule['available_seats'] / $schedule['total_seats']) > 0.2 ? '#f39c12' : '#e74c3c'); ?>; 
-                                 height: 100%; width: <?php echo ($schedule['available_seats'] / $schedule['total_seats']) * 100; ?>%;"></div>
+                            <div style="background: <?php echo $available_percentage > 50 ? '#2ecc71' : ($available_percentage > 20 ? '#f39c12' : '#e74c3c'); ?>; 
+                                 height: 100%; width: <?php echo $available_percentage; ?>%;"></div>
                         </div>
+                        <?php if ($seats_left_text): ?>
+                        <div style="color: #ff6b6b; font-size: 0.7rem; margin-top: 5px;">
+                            <i class="fas fa-exclamation-triangle"></i> <?php echo $seats_left_text; ?>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     
-                    <a href="<?php echo SITE_URL; ?>index.php?page=customer/booking&movie=<?php echo $movie['id']; ?>&schedule=<?php echo $schedule['id']; ?>" 
+                    <div style="margin-bottom: 15px;">
+                        <span style="color: #2ecc71; font-size: 1.1rem; font-weight: 700;">
+                            ₱<?php echo number_format($schedule['base_price'], 2); ?>
+                        </span>
+                        <span style="color: rgba(255,255,255,0.5); font-size: 0.7rem;"> per standard seat</span>
+                    </div>
+                    
+                    <a href="<?php echo SITE_URL; ?>index.php?page=customer/booking&movie=<?php echo $movie['id']; ?>&schedule=<?php echo $schedule['schedule_id']; ?>" 
                        class="btn btn-primary" style="width: 100%; padding: 12px; justify-content: center;">
                         <i class="fas fa-ticket-alt"></i> Select Seats
                     </a>
@@ -392,20 +356,6 @@ require_once $root_dir . '/partials/header.php';
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
-    </div>
-</div>
-
-<!-- Full Image Modal for Venue Photo -->
-<div id="imageModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 10000; justify-content: center; align-items: center; cursor: pointer; padding: 20px;"
-     onclick="closeFullImage()">
-    <div style="max-width: 90%; max-height: 90%; text-align: center;">
-        <img id="fullImage" src="" alt="" style="max-width: 100%; max-height: 80vh; border-radius: 10px; border: 3px solid var(--primary-red);">
-        <div style="margin-top: 20px; color: white;">
-            <p id="imageCaption" style="margin-bottom: 10px;"></p>
-            <span style="background: rgba(255,255,255,0.2); padding: 8px 20px; border-radius: 30px; font-size: 0.9rem;">
-                <i class="fas fa-times-circle"></i> Click anywhere to close
-            </span>
-        </div>
     </div>
 </div>
 
@@ -461,11 +411,7 @@ require_once $root_dir . '/partials/header.php';
 }
 
 @media (max-width: 992px) {
-    .movie-details-container > div:first-of-type {
-        grid-template-columns: 1fr;
-    }
-    
-    .venue-section > div {
+    .movie-details-container > div:first-of-type > div {
         grid-template-columns: 1fr;
     }
 }
@@ -478,53 +424,7 @@ require_once $root_dir . '/partials/header.php';
     h1 {
         font-size: 2rem !important;
     }
-    
-    .venue-section > div {
-        grid-template-columns: 1fr;
-        gap: 20px;
-    }
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-#imageModal {
-    animation: fadeIn 0.3s ease;
 }
 </style>
-
-<script>
-function openFullImage(imageUrl, venueName) {
-    const modal = document.getElementById('imageModal');
-    const fullImage = document.getElementById('fullImage');
-    const caption = document.getElementById('imageCaption');
-    
-    fullImage.src = imageUrl;
-    caption.innerHTML = `<i class="fas fa-building"></i> ${escapeHtml(venueName)} - Venue Photo`;
-    modal.style.display = 'flex';
-}
-
-function closeFullImage() {
-    const modal = document.getElementById('imageModal');
-    modal.style.display = 'none';
-}
-
-// Escape HTML to prevent XSS
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// Close modal with Escape key
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        closeFullImage();
-    }
-});
-</script>
 
 <?php require_once $root_dir . '/partials/footer.php'; ?>
